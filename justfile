@@ -17,6 +17,10 @@ lint:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
 
+# Run the M1 audio spike, e.g. `just spike recv` (see ROADMAP.md)
+spike *args:
+    cargo run --release -p crossglide-spike -- {{args}}
+
 # Check dependencies for advisories, bans and unknown sources
 deny:
     cargo deny check advisories bans sources

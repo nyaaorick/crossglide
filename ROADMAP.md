@@ -58,13 +58,32 @@ Set up only what audio needs. Trimming the core build and the UI crates wait unt
 
 Small, throwaway binaries that answer "does this work on our hardware?" before any architecture is built on it. Findings go into [Decisions](README.md#decisions) in the README.
 
+The spike is one binary, `crates/spike`, run as `just spike <command>`: `capture`, `play`, `opus`, `send` and `recv`. It uses `cpal` 0.18 and `opus` 0.4. `send` can also stream a sine or a WAV instead of loopback, and `--drop-every N` simulates loss.
+
 - [ ] **Capture (PC):** record 60 s of system audio from the default output device via `cpal` WASAPI loopback into a WAV file, while playing a video.
-- [ ] **Playback (Mac):** play a WAV and a generated sine through `cpal` on CoreAudio, on the built-in speakers.
-- [ ] **Opus:** round-trip that WAV through `opus` (or `audiopus`) at 128 kbps stereo, 10 ms frames, `RESTRICTED_LOWDELAY` mode. Measure encode CPU on the PC.
-- [ ] **Build:** confirm the Opus crate builds libopus from source on both OSes with no system library installed.
-- [ ] **Naive stream:** send Opus frames over plain UDP from PC to Mac with a fixed 40 ms buffer. No QUIC yet. Listen for 10 minutes.
+- [x] **Playback (Mac):** play a WAV and a generated sine through `cpal` on CoreAudio, on the built-in speakers. Works; no underruns. (Run at volume 0; an audible listen is still to do.)
+- [ ] **Opus:** round-trip that WAV through `opus` at 128 kbps stereo, 10 ms frames, `RESTRICTED_LOWDELAY` mode. Measure encode CPU on the PC. Done on the Mac with test WAVs (below); still to do on the PC with a real capture.
+- [ ] **Build:** confirm the Opus crate builds libopus from source on both OSes with no system library installed. Works on the Mac: `opus` 0.4 builds it through `opusic-sys` and CMake, linked statically. The PC needs CMake too.
+- [ ] **Naive stream:** send Opus frames over plain UDP from PC to Mac with a fixed 40 ms buffer. No QUIC yet. Listen for 10 minutes. Works Mac → Mac over localhost (below); PC → Mac still to do.
 
 **Done when:** the naive stream sounds clean on the target LAN, or the failures are written down with a decision. If `cpal` loopback fails, the fallback is miniaudio through `cc`.
+
+**Mac results, 2026-09-25** (MacBook Air, macOS 26.5, built-in speakers at 48 kHz):
+
+| Check | Result |
+| --- | --- |
+| Opus packet size | 161 bytes on average, 292 max (129 kbps); fits one datagram easily |
+| Opus CPU | Encode 97 µs and decode 22 µs per 10 ms frame: about 1% and 0.2% of one core |
+| Opus lookahead | 120 samples (2.5 ms), as the [latency budget](#latency-budget) assumed |
+| Stream, no loss | 30 s over localhost: 3001 of 3001 frames, buffer steady at 33–47 ms, no underruns |
+| Stream, 2% loss | Every lost frame concealed by Opus PLC, no underruns |
+| Buffer creep | In one run the buffer settled at 117–125 ms instead of 40 ms and stayed there. A fixed buffer never drains extra audio it builds up, so M3's jitter buffer must shrink back toward its target, not only grow |
+
+**Running it on the PC and the Mac:**
+
+1. On the PC, install Rust (rustup, with the MSVC build tools it offers), CMake, `just` and git, then clone the repo. Set the output device to 48 kHz (Settings > System > Sound > the device > Output settings > Format).
+2. PC: `just spike capture --seconds 60` while a video plays; listen to `capture.wav`, then run `just spike opus capture.wav`.
+3. Mac: `just spike recv`. PC: `just spike send --loopback --to <Mac IP>:5004`. Listen for 10 minutes and watch `lost`, `underruns` and `buffer` in the Mac's output.
 
 ## M2: Side channel
 

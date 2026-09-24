@@ -202,7 +202,7 @@ flowchart LR
 | --- | --- | --- |
 | Capture and playback | `cpal` (pure Rust) | WASAPI loopback on Windows captures system audio with no virtual sound card or driver; CoreAudio on Mac; builds with cargo |
 | Fallback | miniaudio | Single C header, Public Domain / MIT-0; built by cargo via `cc` if `cpal` loopback misbehaves |
-| Compression | libopus via the `opus` / `audiopus` crate | BSD licence; about 128 kbps stereo sounds close to lossless; a few ms per frame; built-in packet-loss concealment |
+| Compression | libopus via the `opus` crate (0.4), which builds libopus from source with CMake and links it statically | BSD licence; about 128 kbps stereo sounds close to lossless; a few ms per frame; built-in packet-loss concealment. Measured on the Mac: about 1% of one core to encode ([M1](ROADMAP.md#m1-audio-spike)) |
 | Transport | QUIC datagrams | See [Transport](#transport-tcp-vs-udp) |
 
 SonoBus isn't used. It targets multi-party music sessions and depends on JUCE, and its GPL-3.0 licence is incompatible with Deskflow's GPL-2.0. Its ideas (jitter buffering, Opus tuning) are reused, not its code.
