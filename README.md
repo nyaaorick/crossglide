@@ -243,7 +243,7 @@ The fork's server must work with a stock Deskflow 1.26 client, and vice versa. E
 - The core protocol and TCP port 24800 are unchanged; new features use only the QUIC side channel.
 - C++ changes are kept small and upstreamable: they're made on a Deskflow fork and sent upstream as PRs. The submodule moves to newer upstream commits regularly.
 - Config files stay readable by upstream Deskflow.
-- Licence: Deskflow is GPL-2.0, so the fork is released under GPL-2.0. Every dependency must be GPL-2.0-compatible: `cpal`, libopus (BSD), miniaudio (Public Domain/MIT-0), `quinn`, `egui` and `tray-icon` are MIT/Apache-2.0. GPL-3.0 code such as SonoBus/JUCE is excluded.
+- Licence: GPL-2.0 for the whole project, the same as Deskflow. Dependency licences aren't checked, because this is for personal use and nothing is distributed. Before ever distributing binaries, check them: quinn's TLS crypto (`ring` or `aws-lc-rs`) requires Apache-2.0, which can't be combined with GPL-2.0.
 
 ## Decisions
 
@@ -252,6 +252,7 @@ The fork's server must work with a stock Deskflow 1.26 client, and vice versa. E
 | Languages | Rust for all new code; upstream C++ core kept | Swift (Mac-only, needs a Swift ↔ Rust bridge, second UI) |
 | UI | One Rust UI (`tray-icon` + `egui`) on both OSes | Qt (keeps the old GUI), Tauri (adds a web frontend) |
 | Core ↔ Rust | Rust spawns the core as a process | FFI linking |
+| Licence | GPL-2.0 for everything, the same as Deskflow; dependency licences not checked | A separate licence for crossglide's own code (two licences to track); a licence check (it blocks quinn's TLS crypto, which only matters when distributing) |
 | Upstream in the repo | Git submodule at `upstream/`, pinned to a commit | Subtree (brings upstream history into this repo, and upstreaming changes needs `git subtree split`) |
 | Keyboard/mouse transport | Upstream TCP + TLS | Changing it would break stock clients and risk stuck keys |
 | New-feature transport | QUIC (`quinn`) over UDP | Raw UDP (no encryption or reliable streams), TCP (head-of-line blocking) |
@@ -267,5 +268,5 @@ The fork's server must work with a stock Deskflow 1.26 client, and vice versa. E
 - [x] Mac mic → PC: left out of the audio MVP. Virtual audio driver vs ESP32 USB audio is decided later.
 - [ ] Esparrier: confirm its config format, supported boards and licence, and whether upstream would accept a touchpad descriptor.
 - [x] Upstream as git subtree or submodule? Submodule; see [Decisions](#decisions).
-- [ ] Licence of the Rust crates: GPL-2.0-only rules out quinn's TLS crypto (`ring` and `aws-lc-rs` both need Apache-2.0). See [ROADMAP.md](ROADMAP.md#m2-side-channel).
+- [x] Licence: GPL-2.0 throughout, dependency licences not checked; see [Decisions](#decisions).
 - [x] Order of work: audio first (PC → Mac), then Rust agent + UI with pairing → logs and config → MCP → Esparrier → touchpad (riskiest last). See [ROADMAP.md](ROADMAP.md).

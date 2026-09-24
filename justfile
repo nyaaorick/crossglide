@@ -17,9 +17,9 @@ lint:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
 
-# Check dependency licences, advisories, bans and sources
+# Check dependencies for advisories, bans and unknown sources
 deny:
-    cargo deny check
+    cargo deny check advisories bans sources
 
 # Fetch and build the Deskflow core into build/upstream
 [macos]

@@ -1,8 +1,5 @@
-# cargo-deny config: `just deny`.
-#
-# Crossglide is GPL-2.0-only, so every dependency's licence must be compatible
-# with it. Apache-2.0 on its own is NOT (it's only compatible with GPL-3.0), but
-# the common "MIT OR Apache-2.0" passes because MIT can be chosen.
+# cargo-deny config: `just deny` checks advisories, bans and sources.
+# Dependency licences aren't checked; see "Licence" in README.md's Decisions.
 
 [graph]
 targets = [
@@ -14,28 +11,6 @@ targets = [
 
 [advisories]
 ignore = []
-
-[licenses]
-allow = [
-    "0BSD",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "BSL-1.0",
-    "CC0-1.0",
-    "ISC",
-    "MIT",
-    "MIT-0",
-    "Unicode-3.0",
-    "Unlicense",
-    "Zlib",
-]
-confidence-threshold = 0.8
-unused-allowed-license = "allow"
-exceptions = []
-
-# Our own crates are unpublished and GPL-2.0-only; don't check them against the list.
-[licenses.private]
-ignore = true
 
 [bans]
 multiple-versions = "warn"

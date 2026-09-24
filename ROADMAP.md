@@ -49,7 +49,7 @@ Set up only what audio needs. Trimming the core build and the UI crates wait unt
 - [x] Cargo workspace with `crates/audio` (library) and `crates/agent` (binary), following the layout in the README
 - [x] `justfile` with `just dev`, `just test`, `just lint` (`cargo fmt --check`, `cargo clippy -D warnings`), `just deny`, and `just core` (fetches the submodule and builds the C++ core; macOS only for now)
 - [ ] CI builds and tests on `macos-latest` and `windows-latest`: written in `.github/workflows/ci.yml`, not run yet because the repo has no GitHub remote
-- [x] Licence check (`cargo deny`) that rejects dependencies incompatible with GPL-2.0. Checked by adding `quinn`: it rejects `ring` (see [M2](#m2-side-channel)).
+- [x] Dependency check (`cargo deny`: advisories, bans, sources). Licences aren't checked ([Decisions](README.md#decisions)).
 - [x] `LICENSE` (GPL-2.0) at the repo root
 
 **Done when:** a fresh clone builds and passes `just test` on both machines and in CI. Done on the Mac; the PC and CI are still to do.
@@ -69,8 +69,6 @@ Small, throwaway binaries that answer "does this work on our hardware?" before a
 ## M2: Side channel
 
 The QUIC connection every later feature shares. The PC connects to the Mac, the same direction as the Deskflow client and server.
-
-**Blocked on a licence decision.** quinn runs its TLS through rustls, and both rustls crypto backends need Apache-2.0 unconditionally: `ring` 0.17 is `Apache-2.0 AND ISC`, and `aws-lc-sys` includes `Apache-2.0` in an `AND`. Apache-2.0 can't be combined with GPL-2.0-only code, and `just deny` rejects it. See [Open questions](#open-questions).
 
 - [ ] `quinn` endpoint in `crates/agent`: the Mac listens and the PC connects, on one configurable UDP port
 - [ ] Self-signed certificates on each machine, stored next to the agent config
@@ -183,12 +181,10 @@ Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-
 | `cpal` loopback misbehaves | Blocks the whole feature | M1 tests it first; miniaudio fallback |
 | Wi-Fi jitter | MacBook Wi-Fi power-saving can cause 50 ms+ spikes | Adaptive jitter buffer; recommend Ethernet in docs; stats show the cause |
 | Capture from a Windows service | The M5 agent runs as a service, and session 0 may not capture the user's audio | The MVP runs from a terminal in the user's session; for M5, audio capture runs as a helper in the user's session, like the core client |
-| TLS crypto licence | quinn's crypto backends need Apache-2.0, which GPL-2.0-only code can't use; M2 can't start without a choice | Decide the Rust crates' licence before M2 ([open question](#open-questions)) |
 | Drift compensation artefacts | Bad resampler steering sounds like wow or flutter | Small, slow corrections; test over hours with skew in the harness |
 
 ## Open questions
 
-- [ ] **Licence of the Rust crates (blocks M2).** Options: (a) GPL-2.0-or-later, so dependencies can be taken under GPL-3.0, which accepts Apache-2.0. The agent only spawns `deskflow-core` as a process and doesn't link to it, so it doesn't have to share the core's GPL-2.0-only licence. (b) Keep GPL-2.0-only and add a licence exception for the crypto library, the way Deskflow does for OpenSSL. (c) Use a pure-Rust crypto provider under MIT, which is less mature. Recommended: (a); worth confirming whether that reasoning about process separation holds.
 - [ ] Does `cpal` WASAPI loopback work reliably on the target PC? (M1 answers this; also in the README)
 - [ ] Can the PC's speakers be silenced while loopback still captures audio, or does muting the endpoint also mute the capture?
 - [ ] Should audio capture on Windows run in a user-session helper spawned by the service? (Needed before M5)
