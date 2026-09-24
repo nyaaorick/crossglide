@@ -178,6 +178,9 @@ struct RecvStats {
     concealed: u64,
     overflow: u64,
     bytes: u64,
+    last_packet: Option<Instant>,
+    /// Longest time between two packets since the last report; shows network jitter.
+    max_gap: Duration,
 }
 
 fn push(prod: &mut HeapProd<f32>, samples: &[f32], stats: &mut RecvStats) {
@@ -219,6 +222,11 @@ pub fn recv(listen: SocketAddr, buffer_ms: u32, volume: f32, seconds: Option<u64
                 if n < 2 {
                     continue;
                 }
+                let now = Instant::now();
+                if let Some(prev) = stats.last_packet {
+                    stats.max_gap = stats.max_gap.max(now - prev);
+                }
+                stats.last_packet = Some(now);
                 let seq = u16::from_be_bytes([buf[0], buf[1]]);
                 if let Some(exp) = expected {
                     let ahead = seq.wrapping_sub(exp) as i16;
@@ -250,13 +258,14 @@ pub fn recv(listen: SocketAddr, buffer_ms: u32, volume: f32, seconds: Option<u64
         if elapsed >= next_report || done {
             let play = &playback.stats;
             println!(
-                "t={:>4}s rx={} lost={} late={} concealed={} | buffer={:.0}ms {} underruns={} \
-                 skipped={:.0}ms overflow={:.0}ms errors={} | {:.0} kbps",
+                "t={:>4}s rx={} lost={} late={} concealed={} maxgap={}ms | buffer={:.0}ms {} \
+                 underruns={} skipped={:.0}ms overflow={:.0}ms errors={} | {:.0} kbps",
                 elapsed.as_secs(),
                 stats.received,
                 stats.lost,
                 stats.late,
                 stats.concealed,
+                stats.max_gap.as_millis(),
                 to_ms(play.buffered.load(Relaxed)),
                 if play.playing.load(Relaxed) {
                     "playing"
@@ -269,6 +278,7 @@ pub fn recv(listen: SocketAddr, buffer_ms: u32, volume: f32, seconds: Option<u64
                 play.errors.load(Relaxed),
                 stats.bytes as f64 * 8.0 / elapsed.as_secs_f64() / 1000.0,
             );
+            stats.max_gap = Duration::ZERO;
             next_report += REPORT_EVERY;
         }
         if done {
