@@ -209,7 +209,7 @@ SonoBus isn't used. It targets multi-party music sessions and depends on JUCE, a
 
 The work beyond the two libraries:
 
-1. **Jitter buffer:** buffer 20–40 ms so uneven packet arrival doesn't cause dropouts.
+1. **Jitter buffer:** buffer 20–40 ms so uneven packet arrival doesn't cause dropouts, growing briefly after a Wi-Fi delay spike (M1 measured spikes up to 85 ms on the Mac's Wi-Fi; see [ROADMAP.md](ROADMAP.md#m1-audio-spike)).
 2. **Clock drift compensation:** the two sound cards' clocks differ slightly, so resample a little to keep playback from drifting.
 3. **Latency target:** 30–60 ms end to end on a LAN, which is unnoticeable for video.
 
@@ -264,7 +264,7 @@ The fork's server must work with a stock Deskflow 1.26 client, and vice versa. E
 - [ ] Login screen / UAC: replace upstream's Windows service with the Rust agent, or run alongside it?
 - [ ] Touchpad: write and sign a virtual driver, or ship the ESP32 route first?
 - [ ] Is relying on the private MultitouchSupport framework acceptable?
-- [ ] Does `cpal` WASAPI loopback work reliably on the target PC, or is miniaudio needed?
+- [x] Does `cpal` WASAPI loopback work reliably on the target PC, or is miniaudio needed? It works; miniaudio isn't needed ([M1](ROADMAP.md#m1-audio-spike)).
 - [x] Mac mic → PC: left out of the audio MVP. Virtual audio driver vs ESP32 USB audio is decided later.
 - [ ] Esparrier: confirm its config format, supported boards and licence, and whether upstream would accept a touchpad descriptor.
 - [x] Upstream as git subtree or submodule? Submodule; see [Decisions](#decisions).

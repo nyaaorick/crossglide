@@ -48,11 +48,11 @@ Set up only what audio needs. Trimming the core build and the UI crates wait unt
 - [x] Upstream builds on the Mac: Deskflow 1.26.0 at `9ac5464e`, Qt 6.11.2 from Homebrew. 27 of 28 unit-test suites pass; `OSXKeyStateTests` needs Accessibility permission because it sends real keystrokes.
 - [x] Cargo workspace with `crates/audio` (library) and `crates/agent` (binary), following the layout in the README
 - [x] `justfile` with `just dev`, `just test`, `just lint` (`cargo fmt --check`, `cargo clippy -D warnings`), `just deny`, and `just core` (fetches the submodule and builds the C++ core; macOS only for now)
-- [ ] CI builds and tests on `macos-latest` and `windows-latest`: written in `.github/workflows/ci.yml`, not run yet because the repo has no GitHub remote
+- [x] CI builds and tests on `macos-latest` and `windows-latest` (`.github/workflows/ci.yml`); the first run passed on both
 - [x] Dependency check (`cargo deny`: advisories, bans, sources). Licences aren't checked ([Decisions](README.md#decisions)).
 - [x] `LICENSE` (GPL-2.0) at the repo root
 
-**Done when:** a fresh clone builds and passes `just test` on both machines and in CI. Done on the Mac; the PC and CI are still to do.
+**Done when:** a fresh clone builds and passes `just test` on both machines and in CI. Done: it passes on the Mac, on the PC and in CI.
 
 ## M1: Audio spike
 
@@ -60,13 +60,15 @@ Small, throwaway binaries that answer "does this work on our hardware?" before a
 
 The spike is one binary, `crates/spike`, run as `just spike <command>`: `capture`, `play`, `opus`, `send` and `recv`. It uses `cpal` 0.18 and `opus` 0.4. `send` can also stream a sine or a WAV instead of loopback, and `--drop-every N` simulates loss.
 
-- [ ] **Capture (PC):** record 60 s of system audio from the default output device via `cpal` WASAPI loopback into a WAV file, while playing a video.
-- [x] **Playback (Mac):** play a WAV and a generated sine through `cpal` on CoreAudio, on the built-in speakers. Works; no underruns. (Run at volume 0; an audible listen is still to do.)
-- [ ] **Opus:** round-trip that WAV through `opus` at 128 kbps stereo, 10 ms frames, `RESTRICTED_LOWDELAY` mode. Measure encode CPU on the PC. Done on the Mac with test WAVs (below); still to do on the PC with a real capture.
-- [ ] **Build:** confirm the Opus crate builds libopus from source on both OSes with no system library installed. Works on the Mac: `opus` 0.4 builds it through `opusic-sys` and CMake, linked statically. The PC needs CMake too.
-- [ ] **Naive stream:** send Opus frames over plain UDP from PC to Mac with a fixed 40 ms buffer. No QUIC yet. Listen for 10 minutes. Works Mac → Mac over localhost (below); PC → Mac still to do.
+- [x] **Capture (PC):** record 60 s of system audio from the default output device via `cpal` WASAPI loopback into a WAV file, while playing a video. Works (below). The PC's output was already 48 kHz stereo, so no setting changed.
+- [x] **Playback (Mac):** play a WAV and a generated sine through `cpal` on CoreAudio, on the built-in speakers. Works; no underruns, and it sounded good during the PC → Mac listening test.
+- [x] **Opus:** round-trip that WAV through `opus` at 128 kbps stereo, 10 ms frames, `RESTRICTED_LOWDELAY` mode. Measure encode CPU on the PC. Done on both machines, on the PC with a real capture (below).
+- [x] **Build:** confirm the Opus crate builds libopus from source on both OSes with no system library installed. Works on both: `opus` 0.4 builds it through `opusic-sys` and CMake, linked statically.
+- [x] **Naive stream:** send Opus frames over plain UDP from PC to Mac with a fixed 40 ms buffer. No QUIC yet. Listen for 10 minutes. Done: nothing lost in 10 minutes and it sounded good, with two brief dropouts caused by Wi-Fi delay spikes (below).
 
 **Done when:** the naive stream sounds clean on the target LAN, or the failures are written down with a decision. If `cpal` loopback fails, the fallback is miniaudio through `cc`.
+
+**Result: done, 2026-09-25.** `cpal` loopback works, so miniaudio isn't needed. The only weak spot is the Mac's Wi-Fi; the decision for it is below.
 
 **Mac results, 2026-09-25** (MacBook Air, macOS 26.5, built-in speakers at 48 kHz):
 
@@ -79,11 +81,25 @@ The spike is one binary, `crates/spike`, run as `just spike <command>`: `capture
 | Stream, 2% loss | Every lost frame concealed by Opus PLC, no underruns |
 | Buffer creep | In one run the buffer settled at 117–125 ms instead of 40 ms and stayed there. A fixed buffer never drains extra audio it builds up, so M3's jitter buffer must shrink back toward its target, not only grow |
 
+**PC and LAN results, 2026-09-25** (PC: Windows 11 build 26200, i5-12400F. Mac on Wi-Fi 6, 5 GHz):
+
+| Check | Result |
+| --- | --- |
+| Loopback capture | 100% of wall time while audio plays, in 10 ms (480-frame) callbacks; longest gap 11–14 ms. Nothing is delivered while nothing plays. WASAPI reports one harmless discontinuity at stream start |
+| Capture from session 0 | Commands over SSH run in session 0 (the desktop is session 1), and loopback there still captures the desktop's audio |
+| Opus CPU on the PC | Encode 204–241 µs, decode 48–58 µs per 10 ms frame: about 2% and 0.5% of one core |
+| Stream, 60 s | 6001 of 6001 frames; longest packet gap per 5 s window 13–29 ms; no underruns |
+| Stream, 10 min | 60,003 of 60,003 frames, none lost or late. 2 underruns, right after packet gaps of 42 and 85 ms; gaps of 50–85 ms happened a few times. After the 85 ms spike the buffer sat at 83–91 ms for the rest of the run. No measurable clock drift over 8 minutes |
+
+**Decision for M3:** the Mac's Wi-Fi, not the PC or the codec, limits the stream. M3's jitter buffer starts at 40 ms on Wi-Fi, grows quickly toward about 100 ms when a packet gap exceeds its depth, and shrinks back slowly once gaps settle. When it runs dry it plays Opus concealment instead of silence, and drops the late packets whose time was already concealed. The M3 tasks, the done-when latency and the latency budget are updated to match.
+
 **Running it on the PC and the Mac:**
 
 1. On the PC, install Rust (rustup, with the MSVC build tools it offers), CMake, `just` and git, then clone the repo. Set the output device to 48 kHz (Settings > System > Sound > the device > Output settings > Format).
 2. PC: `just spike capture --seconds 60` while a video plays; listen to `capture.wav`, then run `just spike opus capture.wav`.
-3. Mac: `just spike recv`. PC: `just spike send --loopback --to <Mac IP>:5004`. Listen for 10 minutes and watch `lost`, `underruns` and `buffer` in the Mac's output.
+3. Mac: `just spike recv`. PC: `just spike send --loopback --to <Mac IP>:5004`. Listen for 10 minutes and watch `lost`, `maxgap`, `underruns` and `buffer` in the Mac's output.
+
+Tips: `python3 scripts/make-test-audio.py` makes a 10-minute test WAV (a quiet tone, a beep every second and the elapsed time spoken every 10 seconds), so a dropout can be located. To keep the PC silent while the Mac plays, set the PC's default output to a device with nothing connected (here Digital Output); the audio has to play on the default output device, because that's the one `send` records.
 
 ## M2: Side channel
 
@@ -122,15 +138,15 @@ flowchart LR
 | Timestamp | 4 bytes | Sample index at 48 kHz; drives jitter buffer and latency stats |
 | Opus payload | about 160 bytes | 10 ms at 128 kbps |
 
-**Fixed MVP settings:** 48 kHz stereo, Opus 128 kbps, 10 ms frames, `RESTRICTED_LOWDELAY`, jitter buffer 20–40 ms. Nothing here is configurable yet.
+**Fixed MVP settings:** 48 kHz stereo, Opus 128 kbps, 10 ms frames, `RESTRICTED_LOWDELAY`, adaptive jitter buffer (40 ms on Wi-Fi, up to about 100 ms after a spike). Nothing here is configurable yet.
 
 **Tasks**
 
 - [ ] Capture thread → lock-free ring buffer → encode thread. The capture callback never allocates or blocks.
 - [ ] Resample the device rate (44.1 or 48 kHz) to 48 kHz at the edges with `rubato` (MIT)
-- [ ] Silence: WASAPI loopback sends no data while nothing plays. Detect the gap and send silence or Opus DTX so the Mac doesn't read it as loss.
-- [ ] Adaptive jitter buffer: 20 ms target, growing to 40 ms when measured jitter rises and shrinking back slowly
-- [ ] Loss: Opus packet-loss concealment for single gaps
+- [ ] Silence: WASAPI loopback sends no data while nothing plays (confirmed in M1). Detect the gap and send silence or Opus DTX so the Mac doesn't read it as loss.
+- [ ] Adaptive jitter buffer: start at 40 ms on Wi-Fi (20 ms on Ethernet); grow quickly toward about 100 ms when a packet gap exceeds the current depth (M1 measured Wi-Fi gaps up to 85 ms); shrink back slowly once gaps settle, so one spike doesn't leave latency high (M1's fixed buffer stayed at about 90 ms)
+- [ ] Loss and late packets: Opus packet-loss concealment for missing frames and whenever the buffer runs dry; drop packets that arrive after their time was concealed
 - [ ] Clock drift: steer the playback resampler by jitter-buffer fill level, within ±500 ppm
 - [ ] Start and stop over the control stream, so the PC only captures while the Mac is listening
 - [ ] If either device disappears, stop cleanly with a clear log line; restarting the agent recovers
@@ -138,7 +154,7 @@ flowchart LR
 
 **Done when**, measured on the real machines:
 
-- end-to-end latency is 60 ms or less on Wi-Fi and 45 ms or less on Ethernet ([budget](#latency-budget))
+- end-to-end latency is 75 ms or less on Wi-Fi between delay spikes, and 55 ms or less on Ethernet ([budget](#latency-budget))
 - one hour of music has no audible dropouts
 - two hours of playback show no drift (buffer fill stays within target)
 
@@ -180,16 +196,16 @@ These keep the README's order after audio. Each gets its own task list when it's
 
 ## Latency budget
 
-Estimated for the fixed MVP settings. M3 measures each stage and replaces these numbers.
+Estimated for the fixed MVP settings, with the Wi-Fi numbers from M1. M3 measures each stage and replaces these numbers.
 
 | Stage | Estimate | Notes |
 | --- | --- | --- |
 | WASAPI capture period | 10 ms | Shared-mode default |
 | Opus frame + lookahead | 12.5 ms | 10 ms frame + 2.5 ms in `RESTRICTED_LOWDELAY` |
-| Network | 1–5 ms | LAN; Wi-Fi spikes are absorbed by the jitter buffer |
-| Jitter buffer | 20 ms | Grows to 40 ms under jitter |
+| Network | 1–5 ms | LAN. On Wi-Fi, M1 measured packet gaps usually under 30 ms, with spikes to 85 ms a few times in 10 minutes |
+| Jitter buffer | 20 ms on Ethernet, 40 ms on Wi-Fi | Grows toward about 100 ms after a spike, then shrinks back |
 | CoreAudio output buffer | 5–10 ms | Built-in speakers |
-| **Total** | **about 50–60 ms** | 5 ms frames would save about 10 ms at higher CPU and bitrate (after the MVP) |
+| **Total** | **about 55 ms on Ethernet, 75 ms on Wi-Fi** | 5 ms frames would save about 10 ms at higher CPU and bitrate (after the MVP) |
 
 Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-playback latency continuously. Check it once acoustically: record a click through both machines' speakers with a phone and compare.
 
@@ -197,14 +213,14 @@ Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-
 
 | Risk | Why it matters | Mitigation |
 | --- | --- | --- |
-| `cpal` loopback misbehaves | Blocks the whole feature | M1 tests it first; miniaudio fallback |
-| Wi-Fi jitter | MacBook Wi-Fi power-saving can cause 50 ms+ spikes | Adaptive jitter buffer; recommend Ethernet in docs; stats show the cause |
-| Capture from a Windows service | The M5 agent runs as a service, and session 0 may not capture the user's audio | The MVP runs from a terminal in the user's session; for M5, audio capture runs as a helper in the user's session, like the core client |
+| `cpal` loopback misbehaves | Blocks the whole feature | Retired: M1 showed it works on the target PC |
+| Wi-Fi jitter | M1 measured delay spikes up to 85 ms a few times in 10 minutes; each one caused a dropout with a fixed 40 ms buffer | Adaptive jitter buffer with concealment (M3); an Ethernet adapter for the Mac; stats show the cause |
+| Capture from a Windows service | The M5 agent runs as a service in session 0 | Probably fine: in M1 a session-0 process (over SSH, as the user's account) captured the desktop's audio. A real service runs as a different account, so M5 checks it; the fallback is a helper in the user's session |
 | Drift compensation artefacts | Bad resampler steering sounds like wow or flutter | Small, slow corrections; test over hours with skew in the harness |
 
 ## Open questions
 
-- [ ] Does `cpal` WASAPI loopback work reliably on the target PC? (M1 answers this; also in the README)
-- [ ] Can the PC's speakers be silenced while loopback still captures audio, or does muting the endpoint also mute the capture?
-- [ ] Should audio capture on Windows run in a user-session helper spawned by the service? (Needed before M5)
+- [x] Does `cpal` WASAPI loopback work reliably on the target PC? Yes ([M1](#m1-audio-spike)).
+- [ ] Can the PC's speakers be silenced while loopback still captures audio, or does muting the endpoint also mute the capture? Not tested yet. Workaround from M1: make a device with nothing connected (here Digital Output) the default output, so the PC stays silent.
+- [ ] Should audio capture on Windows run in a user-session helper spawned by the service? Probably not: session-0 capture worked in M1 ([Risks](#risks)). Confirm with the real service in M5.
 - [ ] One QUIC port, or share one with Deskflow's port number (24800/UDP)?
