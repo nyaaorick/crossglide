@@ -129,7 +129,7 @@ The PC needs no full GUI. It runs the Rust agent as a service, a small Rust tray
 No packaging: no `.app` bundle, installer or Homebrew cask. Rust and C++ are compiled languages, so code is always built before it runs, but one command builds and runs everything, and rebuilds are incremental.
 
 1. `git clone` the repo. Upstream Deskflow is a git submodule at `upstream/`, pinned to a commit.
-2. `just dev` (or `make dev`) on either OS: builds the C++ core once with CMake, then `cargo run`s the agent and UI, which spawn the core from the build folder.
+2. `just dev` (or `make dev`) on either OS: builds the C++ core once with CMake, then `cargo run`s the agent and UI, which spawn the core from the build folder. (Today `just dev` runs only the agent, and `just core` builds the core on macOS; see [ROADMAP.md](ROADMAP.md#m0-workspace).)
 3. `cargo watch -x run` rebuilds and restarts on save. Only changed files recompile, usually within seconds. `ccache` speeds up C++ rebuilds.
 4. Both machines' logs stream to the terminal that ran the command.
 
@@ -267,4 +267,5 @@ The fork's server must work with a stock Deskflow 1.26 client, and vice versa. E
 - [x] Mac mic → PC: left out of the audio MVP. Virtual audio driver vs ESP32 USB audio is decided later.
 - [ ] Esparrier: confirm its config format, supported boards and licence, and whether upstream would accept a touchpad descriptor.
 - [x] Upstream as git subtree or submodule? Submodule; see [Decisions](#decisions).
+- [ ] Licence of the Rust crates: GPL-2.0-only rules out quinn's TLS crypto (`ring` and `aws-lc-rs` both need Apache-2.0). See [ROADMAP.md](ROADMAP.md#m2-side-channel).
 - [x] Order of work: audio first (PC → Mac), then Rust agent + UI with pairing → logs and config → MCP → Esparrier → touchpad (riskiest last). See [ROADMAP.md](ROADMAP.md).
