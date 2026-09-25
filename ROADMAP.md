@@ -140,7 +140,7 @@ The QUIC connection every later feature shares. The PC connects to the Mac, the 
 
 ## M3: Audio MVP, PC → Mac speakers
 
-The real pipeline, with one fixed path: the PC's default output device in, the MacBook's built-in speakers out. `crates/audio` doesn't depend on `quinn`: it produces and consumes packets, and the agent moves them. That lets tests run the pipeline over a simulated network.
+The real pipeline, with one fixed path: the PC's output device in, the MacBook's built-in speakers out. `crates/audio` doesn't depend on `quinn`: it produces and consumes packets, and the agent moves them. That lets tests run the pipeline over a simulated network.
 
 ```mermaid
 flowchart LR
@@ -161,25 +161,47 @@ flowchart LR
 | Timestamp | 4 bytes | Sample index at 48 kHz; drives jitter buffer and latency stats |
 | Opus payload | about 160 bytes | 10 ms at 128 kbps |
 
-**Fixed MVP settings:** 48 kHz stereo, Opus 128 kbps, 10 ms frames, `RESTRICTED_LOWDELAY`, adaptive jitter buffer (40 ms on Wi-Fi, up to about 100 ms after a spike). Nothing here is configurable yet.
+**Fixed MVP settings:** 48 kHz stereo, Opus 128 kbps, 10 ms frames, `RESTRICTED_LOWDELAY`, adaptive jitter buffer (starts at 40 ms, 20–150 ms), 256-frame output callbacks on the Mac. Nothing here is configurable yet.
 
 **Tasks**
 
-- [ ] Capture thread → lock-free ring buffer → encode thread. The capture callback never allocates or blocks.
-- [ ] Resample the device rate (44.1 or 48 kHz) to 48 kHz at the edges with `rubato` (MIT)
-- [ ] Silence: WASAPI loopback sends no data while nothing plays (confirmed in M1). Detect the gap and send silence or Opus DTX so the Mac doesn't read it as loss.
-- [ ] Adaptive jitter buffer: start at 40 ms on Wi-Fi (20 ms on Ethernet); grow quickly toward about 100 ms when a packet gap exceeds the current depth (M1 measured Wi-Fi gaps up to 85 ms); shrink back slowly once gaps settle, so one spike doesn't leave latency high (M1's fixed buffer stayed at about 90 ms)
-- [ ] Loss and late packets: Opus packet-loss concealment for missing frames and whenever the buffer runs dry; drop packets that arrive after their time was concealed
-- [ ] Clock drift: steer the playback resampler by jitter-buffer fill level, within ±500 ppm
-- [ ] Start and stop over the control stream, so the PC only captures while the Mac is listening
-- [ ] If either device disappears, stop cleanly with a clear log line; restarting the agent recovers
-- [ ] Test harness: run the pipeline through a simulated link with configurable loss, jitter, reordering and clock skew. Assert no underruns at 1% loss and 10 ms jitter, and bounded buffer size under ±300 ppm skew.
+- [x] Capture thread → lock-free ring buffer → encode thread. The capture callback never allocates or blocks: it copies into a `ringbuf` ring, and a thread wakes every 2 ms to resample and encode. The same holds for playback: the whole player runs in the output callback without allocating or locking, fed by a lock-free queue of packets.
+- [x] Resample the device rate to 48 kHz at the edges with `rubato` (sinc, 128 taps): on the PC when its device isn't at 48 kHz, and on the Mac to the output device's rate, in the same resampler that corrects drift.
+- [x] Silence: WASAPI loopback sends nothing while nothing plays. When capture has been quiet for 25 ms, the PC sends Opus-encoded silence every 10 ms on its own clock, so the Mac sees a steady stream.
+- [x] Adaptive jitter buffer: each packet's lateness is measured against the earliest arrival in the last 8 s (relative to its timestamp). The target is the latest lateness of the last 2 minutes plus a 10 ms margin, within 20–150 ms; it starts at 40 ms. A packet within 10% of the held level holds it again; after that it comes down 0.5 ms/s. In the M3 run, packets 25–35 ms late came every minute or two, which a 1-minute hold missed.
+- [x] Loss and late packets: Opus concealment for lost frames. **Changed from the plan:** when the buffer runs dry, the Mac conceals and *waits* for the missing frame instead of skipping it. A delay spike then grows the buffer by the spike instead of throwing audio away; if the frame turns out to be lost, the concealment already played stands in for it, so a lost packet adds no delay. Packets that arrive after their frame was skipped are dropped. With nothing for 200 ms, the buffer starts over.
+- [x] Clock drift: a PI controller steers the playback resampler so the playout delay (how far playback runs behind the earliest arrivals) meets the target. The integral learns the sound cards' skew within ±500 ppm, only while the delay is within 3 ms of the target; with the proportional part and the 500 ppm needed to follow a falling target, the total is at most ±2000 ppm (3.5 cents). The delay is measured against the start of the callback that needs each frame, not its playing time, which is a callback earlier.
+- [x] Start and stop over the control stream: agents list an `audio` feature in the hello. The Mac opens its output device, then asks the PC to start (`audio_start`); the PC captures only after that. Either side sends `audio_stop` with a reason when its device fails, and the connection ending stops both.
+- [x] If either device disappears, stop cleanly with a clear log line (`audio: playback on … stopped: …; restart the agent to play again`) and tell the other side; the connection stays up and restarting the agent recovers. Written to the error callbacks cpal documents, but not yet tested by unplugging a device.
+- [x] Test harness (`crates/audio/src/sim.rs`): the real packetizer output and player through a simulated link with loss, jitter, reordering, delay spikes, outages and clock skew, in simulated time (about 6 s for the lot). Asserts: 1% loss with 10 ms jitter plays with no underruns and the latency expected; ±300 ppm skew at either end keeps the delay within 3 ms of the target on average; 5% of packets 15 ms late plays with none late or lost; a 90 ms spike causes one underrun, a second one none, and the target comes back down; a 1 s outage restarts the buffer once.
+
+Also in M3:
+
+- **Latency measurement:** every 2 s the PC sends `audio_mark`: the timestamp of a recent frame and when its first sample was captured, on its session clock. Every second, the Mac maps the sample it's playing back through the mark and the M2 clock offset, including CoreAudio's output latency and Opus's 2.5 ms lookahead. Every 10 s it logs latency, delay and target, rate and skew, packets, loss, lateness and underruns.
+- **Windows default device:** cpal's default output on Windows is a virtual device that follows the system default, and opening it a second time in one process fails ("Cannot change thread mode after it is set"). Capture opens the device the default points to instead; switching devices takes an agent restart, as planned for the MVP.
+- **Test tone:** `just dev run --test-tone` on the PC sends a 440 Hz tone instead of loopback.
 
 **Done when**, measured on the real machines:
 
 - end-to-end latency is 75 ms or less on Wi-Fi between delay spikes, and 55 ms or less on Ethernet ([budget](#latency-budget))
 - one hour of music has no audible dropouts
 - two hours of playback show no drift (buffer fill stays within target)
+
+**Status, 2026-09-25:** built and running between the Mac and the PC. Over 10 minutes of the test WAV on Wi-Fi, latency was 41–76 ms outside the minutes after a large spike (target 75 ms), with nothing lost and no drift. Each delay spike bigger than the buffer still causes a dropout: three spikes, four dropouts in 10 minutes. Still to do: the hour of music listened to for dropouts, the two-hour drift run, the Ethernet latency, and unplugging a device. Whether a dropout every few minutes is acceptable, or the buffer should stay deeper for longer (more latency), is for the listening test to decide.
+
+**LAN results, 2026-09-25** (Mac on Wi-Fi 6, as in M1 and M2; PC capturing its 'Digital Output' device at 48 kHz):
+
+| Check | Result |
+| --- | --- |
+| Latency, capture to speaker | 41–76 ms, usually 45–71 ms; 133 ms for two minutes after a 105 ms spike, then back down at 0.5 ms/s. First reading 53–55 ms |
+| Packets | 60,000 of 60,000 in 10 minutes, none lost or late. Wi-Fi RTT 3–4 ms |
+| Packet lateness | Up to 10–35 ms most minutes; spikes of 43, 48 and 105 ms in the 10-minute run |
+| Dropouts | 4 (1 each for the 43 and 48 ms spikes, 2 for the 105 ms one). Each time the buffer grew by the spike and the next spikes that size played cleanly. In an earlier run with a 1-minute hold, a 35 ms spike right after the target came down caused one; the hold is now 2 minutes |
+| Drift | The delay stayed within 1 ms of the target in every 10 s report; the sound cards' skew settles at −80 ppm (±10) |
+| Reconnect | Restarting the Mac's agent: audio back within a second of reconnecting. The second capture in one PC agent used to fail on Windows' virtual default device; fixed |
+| Output device | MacBook Air Speakers at 48 kHz: 256-frame callbacks, 7.6 ms output latency, no xruns |
+
+**Running it:** with M2 set up, `just dev` on both machines; audio starts on its own once they connect. Play something on the PC; the Mac logs an `audio:` line every 10 s. To keep the PC itself silent, make a device with nothing connected (here Digital Output) its default output, as in M1.
 
 ## M4: Audio controls and stats
 
@@ -219,27 +241,28 @@ These keep the README's order after audio. Each gets its own task list when it's
 
 ## Latency budget
 
-Estimated for the fixed MVP settings, with the Wi-Fi numbers from M1. M3 measures each stage and replaces these numbers.
+Estimated before M3 for the fixed MVP settings, and measured in M3 on Wi-Fi.
 
-| Stage | Estimate | Notes |
-| --- | --- | --- |
-| WASAPI capture period | 10 ms | Shared-mode default |
-| Opus frame + lookahead | 12.5 ms | 10 ms frame + 2.5 ms in `RESTRICTED_LOWDELAY` |
-| Network | 1–5 ms | LAN. On Wi-Fi, M1 measured packet gaps usually under 30 ms, with spikes to 85 ms a few times in 10 minutes |
-| Jitter buffer | 20 ms on Ethernet, 40 ms on Wi-Fi | Grows toward about 100 ms after a spike, then shrinks back |
-| CoreAudio output buffer | 5–10 ms | Built-in speakers |
-| **Total** | **about 55 ms on Ethernet, 75 ms on Wi-Fi** | 5 ms frames would save about 10 ms at higher CPU and bitrate (after the MVP) |
+| Stage | Estimate | Measured in M3 | Notes |
+| --- | --- | --- | --- |
+| WASAPI capture period | 10 ms | 10 ms callbacks | Shared-mode default |
+| Opus frame + lookahead | 12.5 ms | 12.5 ms | 10 ms frame + 2.5 ms in `RESTRICTED_LOWDELAY` |
+| Network | 1–5 ms | about 2 ms | Half the RTT of 3–4 ms; lateness beyond that is the jitter buffer's job |
+| Jitter buffer | 20 ms on Ethernet, 40 ms on Wi-Fi | 25–55 ms playout delay | Follows how late packets arrive: 25–35 ms on this Wi-Fi, 45–55 ms for a couple of minutes after a spike |
+| Frame deadline | – | 5.3 ms | A frame is needed at the start of the callback that plays it; 256-frame callbacks |
+| CoreAudio output | 5–10 ms | 7.6 ms | Built-in speakers, 256-frame buffer |
+| **Total** | **about 55 ms on Ethernet, 75 ms on Wi-Fi** | **41–76 ms on Wi-Fi**, 133 ms after a 105 ms spike | Measured end to end; 5 ms frames would save about 10 ms at higher CPU and bitrate (after the MVP) |
 
-Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-playback latency continuously. The offset is between the two agents' session clocks, not their wall clocks, so both ends of the audio stream have to read times from the connection's session clock. Check it once acoustically: record a click through both machines' speakers with a phone and compare.
+Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-playback latency continuously (M3 logs it every 10 s). The offset is between the two agents' session clocks, not their wall clocks, so both ends of the audio stream have to read times from the connection's session clock. Check it once acoustically: record a click through both machines' speakers with a phone and compare.
 
 ## Risks
 
 | Risk | Why it matters | Mitigation |
 | --- | --- | --- |
 | `cpal` loopback misbehaves | Blocks the whole feature | Retired: M1 showed it works on the target PC |
-| Wi-Fi jitter | M1 measured delay spikes up to 85 ms a few times in 10 minutes; each one caused a dropout with a fixed 40 ms buffer | Adaptive jitter buffer with concealment (M3); an Ethernet adapter for the Mac; stats show the cause |
+| Wi-Fi jitter | M1 measured delay spikes up to 85 ms a few times in 10 minutes; each one caused a dropout with a fixed 40 ms buffer | Adaptive jitter buffer with concealment (M3): a spike bigger than the buffer still causes one dropout, after which the buffer covers spikes that size for a few minutes. An Ethernet adapter for the Mac; the 10 s stats line shows the cause |
 | Capture from a Windows service | The M5 agent runs as a service in session 0 | Probably fine: in M1 a session-0 process (over SSH, as the user's account) captured the desktop's audio. A real service runs as a different account, so M5 checks it; the fallback is a helper in the user's session |
-| Drift compensation artefacts | Bad resampler steering sounds like wow or flutter | Small, slow corrections; test over hours with skew in the harness |
+| Drift compensation artefacts | Bad resampler steering sounds like wow or flutter | Corrections within ±2000 ppm (3.5 cents), changed smoothly by the resampler; skew tested in the harness. Listening over hours is part of M3's done-when |
 
 ## Open questions
 

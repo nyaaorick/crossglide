@@ -38,6 +38,14 @@ impl SessionClock {
     pub fn now(&self) -> Nanos {
         self.wall + self.start.elapsed().as_nanos() as Nanos
     }
+
+    /// The time on this clock of a moment measured with `Instant`.
+    pub fn at(&self, instant: std::time::Instant) -> Nanos {
+        match instant.checked_duration_since(self.start) {
+            Some(after) => self.wall + after.as_nanos() as Nanos,
+            None => self.wall - self.start.duration_since(instant).as_nanos() as Nanos,
+        }
+    }
 }
 
 /// Probes at connect, in quick succession, so there's an estimate within a second.

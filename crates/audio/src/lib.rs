@@ -3,6 +3,16 @@
 //! This crate doesn't depend on the network: it produces and consumes packets,
 //! and the agent moves them over the side channel.
 
+pub mod codec;
+pub mod device;
+pub mod packet;
+pub mod player;
+pub mod resample;
+pub mod sender;
+
+#[cfg(test)]
+mod sim;
+
 /// Sample rate of the Opus stream. Device audio is resampled to this at the edges.
 pub const SAMPLE_RATE_HZ: u32 = 48_000;
 
@@ -14,6 +24,9 @@ pub const FRAME_MS: u32 = 10;
 
 /// Samples per channel in one frame.
 pub const FRAME_SAMPLES: usize = (SAMPLE_RATE_HZ * FRAME_MS / 1000) as usize;
+
+/// Interleaved stereo samples in one frame.
+pub const FRAME_LEN: usize = FRAME_SAMPLES * CHANNELS as usize;
 
 #[cfg(test)]
 mod tests {

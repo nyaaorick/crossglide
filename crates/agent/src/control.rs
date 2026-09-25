@@ -36,6 +36,10 @@ struct Outgoing {
     reply: oneshot::Sender<Reply>,
 }
 
+/// A request from the peer that this side's features answer (anything but a clock probe), and
+/// where the answer goes.
+pub type Handled = (Request, oneshot::Sender<Response>);
+
 impl Control {
     pub async fn request(&self, body: Request) -> Result<Reply> {
         let (reply, answer) = oneshot::channel();
@@ -63,23 +67,38 @@ pub async fn open(conn: &Connection, role: Role) -> Result<(Stream, Hello)> {
     Ok((Stream { send, recv }, hello))
 }
 
-/// Serves the control stream: answers the peer's requests and sends the ones made through the
-/// returned `Control`. Arrival times and clock answers are on `clock`. The future ends when the
-/// stream closes.
-pub fn serve(stream: Stream, clock: SessionClock) -> (Control, impl Future<Output = Result<()>>) {
+/// Serves the control stream: answers the peer's clock probes, passes its other requests to
+/// the returned receiver, and sends the requests made through the returned `Control`. Arrival
+/// times and clock answers are on `clock`. The future ends when the stream closes.
+pub fn serve(
+    stream: Stream,
+    clock: SessionClock,
+) -> (
+    Control,
+    mpsc::Receiver<Handled>,
+    impl Future<Output = Result<()>>,
+) {
     let (requests, outgoing) = mpsc::channel(16);
-    (Control { requests }, run(stream, clock, outgoing))
+    let (handler, handled) = mpsc::channel(16);
+    (
+        Control { requests },
+        handled,
+        run(stream, clock, outgoing, handler),
+    )
 }
 
 async fn run(
     stream: Stream,
     clock: SessionClock,
     mut outgoing: mpsc::Receiver<Outgoing>,
+    handler: mpsc::Sender<Handled>,
 ) -> Result<()> {
     let Stream { mut send, recv } = stream;
     // Reads get a task of their own: a read isn't cancel-safe, so it can't wait in `select!`.
     let (arrivals, mut incoming) = mpsc::channel(16);
     let reader = tokio::spawn(read_messages(recv, clock, arrivals));
+    // Answers from the handler, which may take a while (opening a sound device).
+    let (answered, mut answers) = mpsc::channel::<(u64, Response)>(16);
     let mut pending: HashMap<u64, oneshot::Sender<Reply>> = HashMap::new();
     let mut next_id = 0u64;
     loop {
@@ -87,9 +106,26 @@ async fn run(
             arrival = incoming.recv() => {
                 let Some((message, arrived)) = arrival else { break };
                 match message {
-                    Message::Request { id, body } => {
-                        let body = answer(body, arrived, &clock);
+                    Message::Request { id, body: Request::Time { t1 } } => {
+                        let body = Response::Time { t1, t2: arrived, t3: clock.now() };
                         proto::write(&mut send, &Message::Response { id, body }).await?;
+                    }
+                    Message::Request { id, body: Request::Unknown } => {
+                        let body = unsupported();
+                        proto::write(&mut send, &Message::Response { id, body }).await?;
+                    }
+                    Message::Request { id, body } => {
+                        let (reply, answer) = oneshot::channel();
+                        if handler.try_send((body, reply)).is_err() {
+                            let body = unsupported();
+                            proto::write(&mut send, &Message::Response { id, body }).await?;
+                            continue;
+                        }
+                        let answered = answered.clone();
+                        tokio::spawn(async move {
+                            let body = answer.await.unwrap_or_else(|_| unsupported());
+                            let _ = answered.send((id, body)).await;
+                        });
                     }
                     Message::Response { id, body } => match pending.remove(&id) {
                         // The requester may have given up waiting; that's fine.
@@ -98,6 +134,9 @@ async fn run(
                     },
                     Message::Unknown => debug!("ignored a message of a kind this agent doesn't know"),
                 }
+            }
+            Some((id, body)) = answers.recv() => {
+                proto::write(&mut send, &Message::Response { id, body }).await?;
             }
             Some(Outgoing { body, reply }) = outgoing.recv() => {
                 next_id += 1;
@@ -123,15 +162,8 @@ async fn read_messages(
     Ok(())
 }
 
-fn answer(request: Request, arrived: Nanos, clock: &SessionClock) -> Response {
-    match request {
-        Request::Time { t1 } => Response::Time {
-            t1,
-            t2: arrived,
-            t3: clock.now(),
-        },
-        Request::Unknown => Response::Error {
-            message: "this agent doesn't support that request".into(),
-        },
+fn unsupported() -> Response {
+    Response::Error {
+        message: "this agent doesn't support that request".into(),
     }
 }

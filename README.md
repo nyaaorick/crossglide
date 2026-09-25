@@ -209,9 +209,9 @@ SonoBus isn't used. It targets multi-party music sessions and depends on JUCE, a
 
 The work beyond the two libraries:
 
-1. **Jitter buffer:** buffer 20–40 ms so uneven packet arrival doesn't cause dropouts, growing briefly after a Wi-Fi delay spike (M1 measured spikes up to 85 ms on the Mac's Wi-Fi; see [ROADMAP.md](ROADMAP.md#m1-audio-spike)).
-2. **Clock drift compensation:** the two sound cards' clocks differ slightly, so resample a little to keep playback from drifting.
-3. **Latency target:** 30–60 ms end to end on a LAN, which is unnoticeable for video.
+1. **Jitter buffer:** buffer 20–40 ms so uneven packet arrival doesn't cause dropouts, growing after a Wi-Fi delay spike and coming back down a few minutes later (M1 measured spikes up to 85 ms on the Mac's Wi-Fi). Built in [M3](ROADMAP.md#m3-audio-mvp-pc--mac-speakers): the target follows how late packets actually arrive.
+2. **Clock drift compensation:** the two sound cards' clocks differ slightly, so resample a little to keep playback from drifting. In M3 the same resampler also converts to the output device's rate and brings the buffer back down after a spike.
+3. **Latency target:** 30–60 ms end to end on a LAN, which is unnoticeable for video. M3 measures it continuously and logs it every 10 s.
 
 | Direction | Capture | Playback | Hard part |
 | --- | --- | --- | --- |

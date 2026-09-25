@@ -1,6 +1,7 @@
 //! Crossglide agent. Runs on both machines and keeps the side channel up: one QUIC connection
 //! from the PC to the Mac, which audio (M3) and later features share.
 
+mod audio;
 mod clock;
 mod config;
 mod control;
@@ -23,6 +24,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
+use crossglide_audio::device::Source;
+
 use crate::config::Config;
 use crate::identity::Identity;
 use crate::link::{Settings, Status};
@@ -44,7 +47,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Connect to the other machine and stay connected (the default)
-    Run,
+    Run {
+        /// On the PC: send a 440 Hz test tone instead of what the PC plays
+        #[arg(long)]
+        test_tone: bool,
+    },
     /// Print this machine's certificate fingerprint, for the other machine's peer_fingerprint
     Fingerprint,
 }
@@ -55,7 +62,7 @@ const LOG_FILE: &str = "agent.log";
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
-    let command = cli.command.unwrap_or(Command::Run);
+    let command = cli.command.unwrap_or(Command::Run { test_tone: false });
     let dir = match cli.config_dir.map_or_else(config::default_dir, Ok) {
         Ok(dir) => dir,
         Err(e) => {
@@ -63,7 +70,7 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let log_file = matches!(command, Command::Run).then(|| dir.join(LOG_FILE));
+    let log_file = matches!(command, Command::Run { .. }).then(|| dir.join(LOG_FILE));
     if let Err(e) = start_logging(log_file.as_deref()) {
         eprintln!("error: {e:#}");
         return ExitCode::FAILURE;
@@ -115,11 +122,18 @@ async fn run(command: Command, dir: &Path) -> Result<()> {
             println!("{}", identity.fingerprint);
             Ok(())
         }
-        Command::Run => run_agent(dir, identity).await,
+        Command::Run { test_tone } => {
+            let source = if test_tone {
+                Source::Tone
+            } else {
+                Source::Loopback
+            };
+            run_agent(dir, identity, source).await
+        }
     }
 }
 
-async fn run_agent(dir: &Path, identity: Identity) -> Result<()> {
+async fn run_agent(dir: &Path, identity: Identity, source: Source) -> Result<()> {
     let path = dir.join(config::FILE);
     let Some(config) = Config::load_or_init(&path)? else {
         bail!(
@@ -134,6 +148,7 @@ async fn run_agent(dir: &Path, identity: Identity) -> Result<()> {
         mode: config.mode().with_context(context)?,
         peer: config.peer_fingerprint().with_context(context)?,
         identity,
+        audio: Some(source),
     };
     info!(
         "crossglide-agent {} on {}; this machine's fingerprint is {}",

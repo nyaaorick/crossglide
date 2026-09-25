@@ -13,9 +13,8 @@ use crate::clock::Nanos;
 /// Version of the control-stream protocol. Agents only talk to the same version.
 pub const PROTOCOL: u32 = 1;
 
-/// Optional features this agent supports. One is used only when both sides list it; audio
-/// (M3) adds the first.
-const FEATURES: &[&str] = &[];
+/// Optional features this agent supports. One is used only when both sides list it.
+const FEATURES: &[&str] = &[crate::audio::FEATURE];
 
 /// Largest message either side accepts.
 const MAX_FRAME: usize = 1 << 20;
@@ -79,6 +78,13 @@ pub enum Message {
 pub enum Request {
     /// Clock probe; `t1` is the sender's clock when it sent this.
     Time { t1: Nanos },
+    /// From the Mac, once it can play: start sending audio.
+    AudioStart,
+    /// Either way: this side has stopped audio (its device failed, say), and why.
+    AudioStop { reason: String },
+    /// From the PC, every few seconds while sending: the audio frame with timestamp `ts` was
+    /// captured at `at` on the PC's session clock. The Mac measures latency from it.
+    AudioMark { ts: u32, at: Nanos },
     /// A request this agent doesn't know. Answered with an error.
     #[serde(other)]
     Unknown,
@@ -94,6 +100,7 @@ pub enum Response {
         t2: Nanos,
         t3: Nanos,
     },
+    Ok,
     Error {
         message: String,
     },

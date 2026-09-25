@@ -6,12 +6,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use crossglide_audio::device::Source;
 use quinn::{ClientConfig, Connection, ConnectionError, Endpoint, Incoming, ServerConfig};
 use tokio::sync::watch;
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
+use crate::audio;
 use crate::clock::{self, Sample, SessionClock};
 use crate::config::Role;
 use crate::control;
@@ -33,6 +35,8 @@ pub struct Settings {
     pub identity: Identity,
     /// Fingerprint of the one certificate the peer may use.
     pub peer: Fingerprint,
+    /// Audio on or off, and what to send when this side sends (the PC).
+    pub audio: Option<Source>,
 }
 
 /// What the rest of the agent sees of the side channel.
@@ -89,6 +93,7 @@ pub async fn run(
         role,
         peer: settings.peer,
         ours: settings.identity.fingerprint,
+        audio: settings.audio,
         status,
     });
     match settings.mode {
@@ -107,6 +112,7 @@ struct Ctx {
     role: Role,
     peer: Fingerprint,
     ours: Fingerprint,
+    audio: Option<Source>,
     status: watch::Sender<Status>,
 }
 
@@ -329,8 +335,10 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
     });
 
     let session_clock = SessionClock::start();
-    let (control, serve) = control::serve(stream, session_clock);
+    let (control, requests, serve) = control::serve(stream, session_clock);
+    let (peer_clock, peer_clock_rx) = watch::channel(None);
     let update_clock = |estimate| {
+        peer_clock.send_replace(Some(estimate));
         ctx.status.send_modify(|s| {
             if let Some(peer) = &mut s.peer
                 && peer.conn.stable_id() == id
@@ -339,10 +347,36 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
             }
         })
     };
+    let audio = async {
+        let session = audio::Session {
+            conn: conn.clone(),
+            control: control.clone(),
+            clock: session_clock,
+            peer_clock: peer_clock_rx,
+            peer: hello.host.clone(),
+        };
+        match (ctx.audio, ctx.role) {
+            _ if !features.iter().any(|f| f == audio::FEATURE) => {
+                if ctx.audio.is_some() {
+                    info!(
+                        "audio: {} doesn't support audio; update crossglide there",
+                        hello.host
+                    );
+                }
+                drop(requests);
+            }
+            (None, _) => drop(requests),
+            (Some(_), Role::Listen) => audio::play(session, requests).await,
+            (Some(source), Role::Connect) => audio::send(session, source, requests).await,
+        }
+        // Runs until the control stream closes, which `serve` reports.
+        std::future::pending::<()>().await
+    };
     let served = tokio::select! {
         biased;
         served = serve => served,
         () = clock::probe(&control, &session_clock, &hello.host, update_clock) => Ok(()),
+        () = audio => Ok(()),
     };
     if conn.close_reason().is_none() {
         if let Err(e) = &served {
@@ -490,6 +524,7 @@ mod tests {
                 mode,
                 identity: identity.clone(),
                 peer: peer.fingerprint,
+                audio: None,
             };
             let task = tokio::spawn(run(settings, sender, stop.clone()));
             Self { status, stop, task }
