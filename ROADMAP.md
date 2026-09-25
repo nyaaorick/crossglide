@@ -219,11 +219,11 @@ There's no UI yet, so controls are a config file and CLI flags. The typed shared
 
 A minimal tray app, brought forward from M6 so the Mac and PC setup can be used day to day and give feedback before M4 and the full UI. `crates/ui` builds `crossglide`, which runs the agent in-process (the agent is now a library as well as the `crossglide-agent` command) and shows a coloured dot in the Windows notification area or the Mac menu bar: green connected, amber connecting or something to look at, grey waiting, red stopped.
 
-The menu shows the connection and the audio state (device, and latency on the Mac), and has: Audio on/off (reconnects; not remembered after a restart), Open log, Open config folder, Start at login (a `Run` registry value on Windows, a LaunchAgent on macOS, pointing at the exe that set it), and Quit, which tells the other machine it's stopping. Release builds have no console window on Windows; everything goes to `agent.log`. Only one copy runs per user.
+The menu shows the connection and the audio state (device, and latency on the Mac), and has: Audio on/off (reconnects; not remembered after a restart), Open log, Open config folder, Start at login (a `Run` registry value on Windows, a LaunchAgent on macOS, pointing at the exe that set it), and Quit, which tells the other machine it's stopping. The log goes to the terminal and to `agent.log`. Only one copy runs per user.
 
-Not in it yet: settings or pairing in the UI (edit `agent.toml`), remembering audio off, an app icon or installer.
+Not in it yet: settings or pairing in the UI (edit `agent.toml`), remembering audio off, an app icon, release builds or an installer. Until it's mature it runs from source only; release builds (no console window on Windows) and packaging come last.
 
-**Running it:** `just tray` in the repo on each machine (a release build). On Windows it can also be started directly: `target\release\crossglide.exe`. Run either the tray app or `just dev` on a machine, not both.
+**Running it:** from source, a debug build. On the Mac, `just tray` in the repo. On Windows, drag `scripts\tray.ps1` into a PowerShell window and press Enter; it first stops any copy already running, so it doubles as a restart after a code change. Run either the tray app or `just dev` on a machine, not both.
 
 ## After the audio MVP
 
