@@ -13,7 +13,7 @@ use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::audio;
+use crate::audio::{self, AudioStatus};
 use crate::clock::{self, Sample, SessionClock};
 use crate::config::Role;
 use crate::control;
@@ -30,6 +30,7 @@ pub enum Mode {
     Connect { host: String, port: u16 },
 }
 
+#[derive(Clone)]
 pub struct Settings {
     pub mode: Mode,
     pub identity: Identity,
@@ -53,6 +54,7 @@ pub struct Peer {
     pub hello: Hello,
     /// Clock offset and RTT, once the first probes are back.
     pub clock: Option<Sample>,
+    pub audio: AudioStatus,
 }
 
 /// QUIC application close codes: why this side closed a connection.
@@ -320,6 +322,7 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
             conn: conn.clone(),
             hello: hello.clone(),
             clock: None,
+            audio: AudioStatus::Off,
         };
         if let Some(old) = s.peer.replace(new) {
             // The peer came back (a restart, or waking from sleep) before this side noticed the
@@ -347,6 +350,15 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
             }
         })
     };
+    let report_audio = |audio| {
+        ctx.status.send_modify(|s| {
+            if let Some(peer) = &mut s.peer
+                && peer.conn.stable_id() == id
+            {
+                peer.audio = audio;
+            }
+        })
+    };
     let audio = async {
         let session = audio::Session {
             conn: conn.clone(),
@@ -366,8 +378,10 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
                 drop(requests);
             }
             (None, _) => drop(requests),
-            (Some(_), Role::Listen) => audio::play(session, requests).await,
-            (Some(source), Role::Connect) => audio::send(session, source, requests).await,
+            (Some(_), Role::Listen) => audio::play(session, requests, report_audio).await,
+            (Some(source), Role::Connect) => {
+                audio::send(session, source, requests, report_audio).await
+            }
         }
         // Runs until the control stream closes, which `serve` reports.
         std::future::pending::<()>().await

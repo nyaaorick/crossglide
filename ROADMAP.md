@@ -19,11 +19,12 @@ Audio streaming (PC → Mac) is the first feature. It comes before the Deskflow 
 4. [M2: Side channel](#m2-side-channel)
 5. [M3: Audio MVP, PC → Mac speakers](#m3-audio-mvp-pc--mac-speakers)
 6. [M4: Audio controls and stats](#m4-audio-controls-and-stats)
-7. [After the audio MVP](#after-the-audio-mvp)
-8. [Later milestones](#later-milestones)
-9. [Latency budget](#latency-budget)
-10. [Risks](#risks)
-11. [Open questions](#open-questions)
+7. [Tray app (early M6)](#tray-app-early-m6)
+8. [After the audio MVP](#after-the-audio-mvp)
+9. [Later milestones](#later-milestones)
+10. [Latency budget](#latency-budget)
+11. [Risks](#risks)
+12. [Open questions](#open-questions)
 
 ## Overview
 
@@ -213,6 +214,16 @@ There's no UI yet, so controls are a config file and CLI flags. The typed shared
 - [ ] Document the PC's own speakers: whether they can be muted without muting the loopback ([open question](#open-questions))
 
 **Done when:** you can turn audio on and off and change the volume without restarting, and the log alone is enough to explain a dropout afterwards.
+
+## Tray app (early M6)
+
+A minimal tray app, brought forward from M6 so the Mac and PC setup can be used day to day and give feedback before M4 and the full UI. `crates/ui` builds `crossglide`, which runs the agent in-process (the agent is now a library as well as the `crossglide-agent` command) and shows a coloured dot in the Windows notification area or the Mac menu bar: green connected, amber connecting or something to look at, grey waiting, red stopped.
+
+The menu shows the connection and the audio state (device, and latency on the Mac), and has: Audio on/off (reconnects; not remembered after a restart), Open log, Open config folder, Start at login (a `Run` registry value on Windows, a LaunchAgent on macOS, pointing at the exe that set it), and Quit, which tells the other machine it's stopping. Release builds have no console window on Windows; everything goes to `agent.log`. Only one copy runs per user.
+
+Not in it yet: settings or pairing in the UI (edit `agent.toml`), remembering audio off, an app icon or installer.
+
+**Running it:** `just tray` in the repo on each machine (a release build). On Windows it can also be started directly: `target\release\crossglide.exe`. Run either the tray app or `just dev` on a machine, not both.
 
 ## After the audio MVP
 

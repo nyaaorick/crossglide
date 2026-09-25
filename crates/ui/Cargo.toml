@@ -1,0 +1,25 @@
+[package]
+name = "crossglide-ui"
+description = "Crossglide tray app: runs the agent with a menu bar / tray icon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "crossglide"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.104"
+crossglide-agent.workspace = true
+crossglide-audio.workspace = true
+dirs = "7.0.0"
+tao = "0.37"
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "sync", "time"] }
+tokio-util = "0.7.19"
+tracing = "0.1.44"
+tray-icon = "0.25"
+
+[target."cfg(windows)".dependencies]
+winreg = "0.56"

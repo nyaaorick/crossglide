@@ -26,6 +26,25 @@ const REPORT_EVERY: u32 = 10;
 /// How often the PC sends a latency mark, in seconds.
 const MARK_EVERY: u32 = 2;
 
+/// What the audio stream is doing, for the tray.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum AudioStatus {
+    /// Off on this machine, or the other one can't do audio.
+    #[default]
+    Off,
+    /// Waiting for the other side: the Mac to ask for audio, or the PC to answer.
+    Waiting,
+    Sending {
+        device: String,
+    },
+    Playing {
+        device: String,
+        /// Median of the last report period, once measured.
+        latency_ms: Option<f64>,
+    },
+    Failed(String),
+}
+
 /// One connection's audio, on either side.
 pub struct Session {
     pub conn: Connection,
@@ -37,20 +56,36 @@ pub struct Session {
 }
 
 /// Plays what the PC sends, until the control stream closes.
-pub async fn play(session: Session, mut requests: mpsc::Receiver<Handled>) {
+pub async fn play(
+    session: Session,
+    mut requests: mpsc::Receiver<Handled>,
+    report: impl Fn(AudioStatus),
+) {
     let peer = &session.peer;
+    report(AudioStatus::Waiting);
     let (playing, mut receiver) = match tokio::task::spawn_blocking(Playing::start).await {
         Ok(Ok(started)) => started,
         Ok(Err(e)) => {
             warn!("audio: {e:#}; no audio until the agent restarts");
+            report(AudioStatus::Failed(format!("{e:#}")));
             return idle(requests, "the Mac can't play audio").await;
         }
         Err(e) => {
             warn!("audio: opening the output device failed: {e}");
+            report(AudioStatus::Failed(format!(
+                "opening the output device failed: {e}"
+            )));
             return idle(requests, "the Mac can't play audio").await;
         }
     };
     info!("audio: playing on {}", playing.device);
+    let playing_status = |latency_ms| AudioStatus::Playing {
+        device: playing.device.clone(),
+        latency_ms,
+    };
+    report(playing_status(None));
+    // Why the PC isn't sending, if it said so; the periodic update doesn't hide it.
+    let mut peer_failed = false;
 
     // Packets go straight from the network to the audio thread.
     let reader = AbortOnDrop(tokio::spawn({
@@ -90,6 +125,8 @@ pub async fn play(session: Session, mut requests: mpsc::Receiver<Handled>) {
                     }
                     Request::AudioStop { reason } => {
                         warn!("audio: {peer} stopped sending: {reason}");
+                        report(AudioStatus::Failed(format!("{peer} stopped sending: {reason}")));
+                        peer_failed = true;
                         Response::Ok
                     }
                     _ => unsupported(),
@@ -102,7 +139,11 @@ pub async fn play(session: Session, mut requests: mpsc::Receiver<Handled>) {
                 if let Ok(Ok(reply)) = started {
                     match reply.body {
                         Response::Ok => info!("audio: {peer} is sending"),
-                        Response::Error { message } => warn!("audio: {peer} can't send: {message}"),
+                        Response::Error { message } => {
+                            warn!("audio: {peer} can't send: {message}");
+                            report(AudioStatus::Failed(format!("{peer} can't send: {message}")));
+                            peer_failed = true;
+                        }
                         other => warn!("audio: unexpected answer from {peer}: {other:?}"),
                     }
                 }
@@ -115,6 +156,7 @@ pub async fn play(session: Session, mut requests: mpsc::Receiver<Handled>) {
                          again",
                         playing.device
                     );
+                    report(AudioStatus::Failed(format!("playback stopped: {reason}")));
                     let control = session.control.clone();
                     tokio::spawn(async move { control.request(Request::AudioStop { reason }).await });
                     drop(reader);
@@ -128,7 +170,11 @@ pub async fn play(session: Session, mut requests: mpsc::Receiver<Handled>) {
                 if ticks.is_multiple_of(REPORT_EVERY) {
                     let now = playing.stats.snapshot();
                     let xruns = playing.output.xruns.load(Relaxed);
-                    report(&last, &now, &mut latencies, &playing.output, xruns - last_xruns);
+                    let median = median(&mut latencies);
+                    if !peer_failed {
+                        report(playing_status(median));
+                    }
+                    log_stats(&last, &now, &mut latencies, &playing.output, xruns - last_xruns);
                     (last, last_xruns) = (now, xruns);
                 }
             }
@@ -159,7 +205,13 @@ fn latency(
     Some((heard - captured) as f64 / 1e6)
 }
 
-fn report(
+/// The median of `values`, sorting them.
+fn median(values: &mut [f64]) -> Option<f64> {
+    values.sort_by(f64::total_cmp);
+    values.get(values.len() / 2).copied()
+}
+
+fn log_stats(
     last: &Snapshot,
     now: &Snapshot,
     latencies: &mut Vec<f64>,
@@ -211,8 +263,14 @@ fn report(
 }
 
 /// Sends `source` while the Mac asks for it, until the control stream closes.
-pub async fn send(session: Session, source: Source, mut requests: mpsc::Receiver<Handled>) {
+pub async fn send(
+    session: Session,
+    source: Source,
+    mut requests: mpsc::Receiver<Handled>,
+    report: impl Fn(AudioStatus),
+) {
     let peer = &session.peer;
+    report(AudioStatus::Waiting);
     let mut sending: Option<Sending> = None;
     let mut tick = interval(Duration::from_secs(1));
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -232,11 +290,13 @@ pub async fn send(session: Session, source: Source, mut requests: mpsc::Receiver
                         match tokio::task::spawn_blocking(move || Sending::start(source, emit)).await {
                             Ok(Ok(started)) => {
                                 info!("audio: sending {} to {peer}", started.device);
+                                report(AudioStatus::Sending { device: started.device.clone() });
                                 sending = Some(started);
                                 Response::Ok
                             }
                             Ok(Err(e)) => {
                                 warn!("audio: {e:#}");
+                                report(AudioStatus::Failed(format!("{e:#}")));
                                 Response::Error { message: format!("{e:#}") }
                             }
                             Err(e) => Response::Error { message: format!("capture failed: {e}") },
@@ -246,6 +306,7 @@ pub async fn send(session: Session, source: Source, mut requests: mpsc::Receiver
                         if sending.take().is_some() {
                             info!("audio: {peer} stopped playing ({reason}); capture stopped");
                         }
+                        report(AudioStatus::Failed(format!("{peer} stopped playing: {reason}")));
                         Response::Ok
                     }
                     _ => unsupported(),
@@ -261,6 +322,7 @@ pub async fn send(session: Session, source: Source, mut requests: mpsc::Receiver
                          again",
                         capture.device
                     );
+                    report(AudioStatus::Failed(format!("capture stopped: {reason}")));
                     let control = session.control.clone();
                     tokio::spawn(async move { control.request(Request::AudioStop { reason }).await });
                     sending = None;

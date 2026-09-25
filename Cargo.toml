@@ -9,6 +9,7 @@ license = "GPL-2.0-only"
 publish = false
 
 [workspace.dependencies]
+crossglide-agent = { path = "crates/agent" }
 crossglide-audio = { path = "crates/audio" }
 
 # Dev builds (`just dev`, `just test`) play real-time audio and simulate minutes of it, which the

@@ -8,6 +8,10 @@ default:
 dev *args:
     cargo run -p crossglide-agent -- {{args}}
 
+# Build and run the tray app (release build: no console window on Windows)
+tray:
+    cargo run --release -p crossglide-ui
+
 # Run all Rust tests
 test:
     cargo test --workspace
