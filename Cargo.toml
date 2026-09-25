@@ -12,11 +12,15 @@ publish = false
 crossglide-agent = { path = "crates/agent" }
 crossglide-audio = { path = "crates/audio" }
 
-# Dev builds (`just dev`, `just test`) play real-time audio and simulate minutes of it, which the
-# unoptimized resampler and codec can't keep up with. Optimize dependencies and the audio crate;
-# they rarely change, so rebuilds stay fast.
+# Everything runs from source as a dev build (no per-platform release builds until the app is
+# mature), and dev builds play real-time audio and simulate minutes of it, which the unoptimized
+# resampler and codec can't keep up with. Optimize dependencies and the audio crates; they rarely
+# change, so rebuilds stay fast.
 [profile.dev.package."*"]
 opt-level = 3
 
 [profile.dev.package.crossglide-audio]
+opt-level = 2
+
+[profile.dev.package.crossglide-spike]
 opt-level = 2

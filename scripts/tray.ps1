@@ -5,7 +5,7 @@ $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot)
 
 # Only one copy runs at a time, and Windows won't let cargo replace a running exe, so stop any
-# copy that's already running (a release build, or this script's last run).
+# copy that's already running (from this script's last run, or started some other way).
 Get-Process crossglide -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 300
 

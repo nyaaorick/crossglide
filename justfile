@@ -23,7 +23,7 @@ lint:
 
 # Run the M1 audio spike, e.g. `just spike recv` (see ROADMAP.md)
 spike *args:
-    cargo run --release -p crossglide-spike -- {{args}}
+    cargo run -p crossglide-spike -- {{args}}
 
 # Check dependencies for advisories, bans and unknown sources
 deny:
