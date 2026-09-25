@@ -95,7 +95,7 @@ Today Deskflow sends everything over TCP with TLS, on port 24800. The fork keeps
 | Logs, config, MCP, pairing | Rust side channel | QUIC reliable streams | Must arrive complete and in order |
 | Audio, touch frames | Rust side channel | QUIC unreliable datagrams (UDP) | Low latency matters more than completeness; with TCP, one retransmitted packet stalls everything behind it |
 
-QUIC (the `quinn` crate) runs over UDP and provides both reliable streams and unreliable datagrams in one connection, with TLS 1.3 built in. The side channel trusts the same certificate fingerprints Deskflow already uses, so pairing happens once.
+QUIC (the `quinn` crate) runs over UDP and provides both reliable streams and unreliable datagrams in one connection, with TLS 1.3 built in. The side channel trusts the same certificate fingerprints Deskflow already uses, so pairing happens once. Until pairing exists ([M5](ROADMAP.md#later-milestones)), each agent has its own self-signed certificate and the other machine's fingerprint is copied into its config by hand ([M2](ROADMAP.md#m2-side-channel)).
 
 ## User interface
 

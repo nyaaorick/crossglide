@@ -105,15 +105,38 @@ Tips: `python3 scripts/make-test-audio.py` makes a 10-minute test WAV (a quiet t
 
 The QUIC connection every later feature shares. The PC connects to the Mac, the same direction as the Deskflow client and server.
 
-- [ ] `quinn` endpoint in `crates/agent`: the Mac listens and the PC connects, on one configurable UDP port
-- [ ] Self-signed certificates on each machine, stored next to the agent config
-- [ ] Fingerprint pinning: each side trusts only the peer fingerprint in its config. Fingerprints are copied by hand for now; the pairing code replaces that in M5.
-- [ ] Control stream: versioned hello (agent version, features), then typed request/response messages (`serde` + a length prefix)
-- [ ] Datagrams enabled; log the negotiated max datagram size at connect
-- [ ] Clock offset and RTT estimate: an NTP-style exchange on the control stream every few seconds, for latency stats
-- [ ] Reconnect with backoff when either side restarts or the network drops
+- [x] `quinn` endpoint in `crates/agent`: the Mac listens and the PC connects, on one configurable UDP port. The default is 24800: Deskflow uses TCP 24800, and TCP and UDP ports don't collide.
+- [x] Self-signed certificates on each machine, stored next to the agent config: `cert.pem` and `key.pem` (ECDSA P-256; the key readable only by the user) beside `agent.toml`, in `~/Library/Application Support/crossglide` on the Mac and `%APPDATA%\crossglide` on the PC
+- [x] Fingerprint pinning: each side trusts only the peer fingerprint in its config. Fingerprints are copied by hand for now; the pairing code replaces that in M5. TLS checks that the peer holds the key for its certificate; the fingerprint is checked right after the handshake, before any stream is used, so both sides can log a clear line when it's refused.
+- [x] Control stream: versioned hello (protocol and agent version, host, OS, features), then typed request/response messages (`serde` JSON with a 4-byte length prefix). Either side can send requests. A different protocol version is refused; a different agent version only warns.
+- [x] Datagrams enabled; log the negotiated max datagram size at connect
+- [x] Clock offset and RTT estimate: an NTP-style exchange on the control stream: a burst of 8 at connect, one every 500 ms for the first 30 s, then one every 2 s. Both sides measure on a session clock (the wall time at connect, advanced by the monotonic clock), because time services slew the wall clocks. The estimate is a line fitted through the samples with the lowest RTTs from the last 5 minutes, since the clocks drift apart. From the second minute on, a summary (offset, drift, jitter, RTT) goes to the log every minute.
+- [x] Reconnect with backoff when either side restarts or the network drops: the PC retries after 0.5 s, doubling up to 10 s; a stopping agent tells the other side; a new connection from the PC replaces a stale one on the Mac. Each agent also appends its log to `agent.log` beside `agent.toml`.
 
 **Done when:** the two machines stay connected for 24 hours through sleep/wake and a Wi-Fi drop, a wrong fingerprint is refused with a clear log line, and the clock offset is stable to within 1 ms.
+
+**Status, 2026-09-25:** built, and checked on the real machines over about 3 hours, 2 of them with the Mac asleep: wrong fingerprints are refused with a clear log line on both sides, the connection comes back after restarts, a network drop and every wake, and once settled the clock offset stays within 0.1 ms of a straight line. Still to do: the full 24-hour run, with the PC's agent started in a terminal on the PC rather than over SSH from the Mac.
+
+**LAN results, 2026-09-25** (the same machines and Wi-Fi as M1):
+
+| Check | Result |
+| --- | --- |
+| Connect | Within 0.1 s once both agents run. Max datagram 1162–1288 bytes at connect; quinn's path MTU discovery raises it later |
+| Wrong fingerprint, either side | Refused before any stream opens. The refusing side logs the fingerprint it got and the one it expected; the refused side logs the fingerprint the other machine needs. The live connection isn't disturbed |
+| Mac agent restarts | The PC reconnects 2 s after the Mac's agent is back |
+| PC agent killed and restarted | The Mac drops the stale connection as soon as the new one arrives, without waiting for the 10 s timeout |
+| UDP blocked for 25 s (PC firewall rule) | Both sides log "nothing heard for 10 s" after 10 s; connected again 3 s after the block ends |
+| Mac asleep for 2 hours, with DarkWakes | Each time the Mac woke, even briefly, the PC was connected within a second and the Mac dropped the stale connection. While the Mac slept, the PC logged one warning per outage, then "reached … after 263 failed attempts over 5243 s" on reconnecting: about four log lines per sleep |
+| RTT | 5–6 ms median on Wi-Fi, 4 ms at best; spikes to 340 ms, and one minute at about 90 ms |
+| Wall clocks | The PC's is 2.3 s behind the Mac's, and they drift apart by about 100 ppm, unevenly: one minute measured 330 ppm. Neither is well synced: the PC's NTP requests time out, and the Mac's go through the proxy's fake-IP DNS (±0.56 s). Against their own monotonic clocks, the Mac's wall clock ran 24 ppm fast and the PC's 145 ppm |
+| Clock offset | Measured first on the wall clocks, with the fastest recent sample as the estimate: jitter 0.8–1.1 ms, then 2.1 ms in the 330 ppm minute and 14.7 ms in the slow-Wi-Fi minute. On session clocks, fitted to a line: the drift is a steady 72–75 ppm, and jitter is 0.02–0.10 ms a minute once settled, with RTT spikes to 99 ms in most minutes. The first minute after connecting reached 1.2–1.7 ms when the network was slow, so the probes are faster then and the log's summaries start after it; in simulation the first summarised minute stays under 0.4 ms even then. The two sides agree on the offset to within 0.5 ms |
+
+**Running it on the PC and the Mac:**
+
+1. On each machine, `just dev fingerprint` prints that machine's fingerprint (and creates its certificate the first time).
+2. On each machine, `just dev` once: it writes a commented `agent.toml` (role `listen` on the Mac, `connect` on the PC) and stops. Set `peer_fingerprint` to the other machine's fingerprint and, on the PC, `server` to the Mac's IP address or host name.
+3. `just dev` on both. Each logs `connected to …` and a first clock estimate within a second, then, from the second minute on, a `clock:` line every minute.
+4. For the 24-hour run, start the PC's agent in a terminal on the PC, not over SSH. Afterwards, read `agent.log` on both machines: every `disconnected` should be followed by `connected` once both are awake and online, and `jitter` in the `clock:` lines should stay under 1 ms.
 
 ## M3: Audio MVP, PC → Mac speakers
 
@@ -207,7 +230,7 @@ Estimated for the fixed MVP settings, with the Wi-Fi numbers from M1. M3 measure
 | CoreAudio output buffer | 5–10 ms | Built-in speakers |
 | **Total** | **about 55 ms on Ethernet, 75 ms on Wi-Fi** | 5 ms frames would save about 10 ms at higher CPU and bitrate (after the MVP) |
 
-Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-playback latency continuously. Check it once acoustically: record a click through both machines' speakers with a phone and compare.
+Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-playback latency continuously. The offset is between the two agents' session clocks, not their wall clocks, so both ends of the audio stream have to read times from the connection's session clock. Check it once acoustically: record a click through both machines' speakers with a phone and compare.
 
 ## Risks
 
@@ -223,4 +246,4 @@ Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-
 - [x] Does `cpal` WASAPI loopback work reliably on the target PC? Yes ([M1](#m1-audio-spike)).
 - [ ] Can the PC's speakers be silenced while loopback still captures audio, or does muting the endpoint also mute the capture? Not tested yet. Workaround from M1: make a device with nothing connected (here Digital Output) the default output, so the PC stays silent.
 - [ ] Should audio capture on Windows run in a user-session helper spawned by the service? Probably not: session-0 capture worked in M1 ([Risks](#risks)). Confirm with the real service in M5.
-- [ ] One QUIC port, or share one with Deskflow's port number (24800/UDP)?
+- [x] One QUIC port, or share one with Deskflow's port number (24800/UDP)? Its own port, 24800/UDP by default: the same number as Deskflow's TCP port, which doesn't collide with it. It's configurable ([M2](#m2-side-channel)).
