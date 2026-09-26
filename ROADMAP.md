@@ -223,7 +223,7 @@ The menu shows the connection and the audio state (device, and latency on the Ma
 
 Not in it yet: settings or pairing in the UI (edit `agent.toml`), remembering audio off, an app icon, release builds or an installer. Until it's mature it runs from source only; release builds (no console window on Windows) and packaging come last.
 
-**Running it:** from source, a debug build. On the Mac, `just tray` in the repo. On Windows, drag `scripts\tray.ps1` into a PowerShell window and press Enter; it first stops any copy already running, so it doubles as a restart after a code change. Run either the tray app or `just dev` on a machine, not both.
+**Running it:** from source, a debug build. On the Mac, double-click `scripts/tray.command` (it opens Terminal), or run `just tray`. On Windows, drag `scripts\tray.ps1` into a PowerShell window and press Enter; it first stops any copy already running, so it doubles as a restart after a code change. Run either the tray app or `just dev` on a machine, not both.
 
 ## After the audio MVP
 
