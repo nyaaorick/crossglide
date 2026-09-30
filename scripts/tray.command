@@ -7,9 +7,10 @@
 # commit. Offline, or with local commits the remote doesn't have, it just runs what's checked out.
 
 # zsh reads a script as it runs it, and the pull below can rewrite this very file, so everything
-# lives in a function: zsh parses it whole before running any of it.
+# lives in a function: zsh parses it whole before running any of it. Inside a function $0 is the
+# function's name, so the script's own directory is passed in from the top level, below.
 main() {
-    cd "${0:A:h}/.." || exit 1
+    cd "$1" || exit 1
 
     # Finder starts this with a minimal PATH, which doesn't include cargo.
     [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
@@ -38,5 +39,5 @@ update() {
         || echo "update: pull failed, running what's checked out"
 }
 
-main "$@"
+main "${0:A:h}/.."
 exit
