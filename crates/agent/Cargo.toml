@@ -1,6 +1,6 @@
 [package]
 name = "crossglide-agent"
-description = "Crossglide agent: side channel, audio and touch, later the Deskflow core supervisor"
+description = "Crossglide agent: the encrypted side channel between the two machines, with audio and touch on top"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

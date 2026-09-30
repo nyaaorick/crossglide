@@ -15,12 +15,10 @@ use crate::touch::TouchSettings;
 
 pub const FILE: &str = "agent.toml";
 
-/// Default UDP port of the side channel. Deskflow uses TCP 24800; TCP and UDP ports don't
-/// collide, so the side channel takes the same number on UDP.
+/// Default UDP port of the side channel.
 const DEFAULT_PORT: u16 = 24800;
 
-/// Which end of the side channel this machine is. The PC connects to the Mac, the same direction
-/// as the Deskflow client and server.
+/// Which end of the side channel this machine is. The Mac listens and the PC connects to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -176,7 +174,7 @@ enabled = true
 edges = ["left", "right"]
 # Moves control to the PC and back.
 hotkey = "{hotkey}"
-# The Command keys on the PC: "win" (as in Deskflow) or "ctrl" (Cmd-C copies).
+# The Command keys on the PC: "win" (the Windows key) or "ctrl" (Cmd-C copies).
 command = "win"
 "#,
         hotkey = Hotkey::DEFAULT

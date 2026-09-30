@@ -14,7 +14,6 @@ jobs:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # The Deskflow submodule isn't needed for the Rust workspace.
       - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable

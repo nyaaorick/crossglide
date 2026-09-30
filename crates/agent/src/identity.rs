@@ -14,7 +14,7 @@ use tracing::info;
 const CERT_FILE: &str = "cert.pem";
 const KEY_FILE: &str = "key.pem";
 
-/// SHA-256 of a certificate's DER bytes, written like Deskflow's: `AB:CD:…` (32 bytes).
+/// SHA-256 of a certificate's DER bytes, written `AB:CD:…` (32 bytes).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Fingerprint([u8; 32]);
 

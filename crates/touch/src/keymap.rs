@@ -13,7 +13,7 @@ pub const EXTENDED: u16 = 0xE000;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CommandKey {
-    /// The Windows key, as Deskflow maps it.
+    /// The Windows key.
     #[default]
     Win,
     /// Control, so Cmd-C copies; the Mac's Control keys become Windows keys instead.
