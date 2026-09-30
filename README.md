@@ -64,7 +64,7 @@ Crossglide is **alpha**, and it's built to run from source for now: there are no
 | Edge hint (frosted-glass strip) | Built, being tested |
 | Install touchpad driver from the tray (Windows) | Working, checked on the PC |
 | Pairing code (fingerprints are copied by hand today) | Planned |
-| Clipboard and the rest of Deskflow's core | Planned |
+| Clipboard sharing | Not started |
 | Logs and config in one place, MCP server | Planned |
 
 Tested on a MacBook Air (macOS 26) and a Windows 11 PC (build 26200), both on the same Wi-Fi network. The [roadmap](ROADMAP.md) has the measurements and what's next.
@@ -104,7 +104,7 @@ Settings live in `agent.toml` in `~/Library/Application Support/crossglide` on t
 
 ## Contributing
 
-Issues and pull requests are welcome, especially reports from other Macs and PCs. Before sending a change:
+Issues and pull requests are welcome, especially reports from other Macs and PCs. [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) has the setup, the command list and a checklist. Before sending a change:
 
 ```sh
 just lint   # rustfmt and clippy, warnings are errors
@@ -114,8 +114,8 @@ just deny   # dependency advisories, bans, sources
 
 ## Thanks
 
-Crossglide grew out of [Deskflow](https://github.com/deskflow/deskflow): it's designed to stay compatible with its protocol and to build on its core, which is vendored here as a submodule. It also stands on [`quinn`](https://github.com/quinn-rs/quinn), [`cpal`](https://github.com/RustAudio/cpal), [`opus`](https://crates.io/crates/opus), [`rubato`](https://github.com/HEnquist/rubato), [`tao`](https://github.com/tauri-apps/tao) and [`tray-icon`](https://github.com/tauri-apps/tray-icon).
+Crossglide is an independent, pure-Rust project. The idea of gliding a pointer off one screen onto another machine comes from software KVMs such as [Deskflow](https://github.com/deskflow/deskflow) and Synergy, but no code or protocol is shared with them. It stands on [`quinn`](https://github.com/quinn-rs/quinn), [`cpal`](https://github.com/RustAudio/cpal), [`opus`](https://crates.io/crates/opus), [`rubato`](https://github.com/HEnquist/rubato), [`tao`](https://github.com/tauri-apps/tao) and [`tray-icon`](https://github.com/tauri-apps/tray-icon).
 
 ## License
 
-[GPL-2.0-only](LICENSE), the same as Deskflow.
+[GPL-2.0-only](LICENSE).

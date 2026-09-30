@@ -2,10 +2,10 @@
 
 *Draft as of 2026-09-25 · builds on the design in [docs/DESIGN.md](docs/DESIGN.md)*
 
-Audio streaming (PC → Mac) is the first feature. It comes before the Deskflow core, pairing and UI work for four reasons:
+Audio streaming (PC → Mac) is the first feature. It comes before pairing, the UI and touch for four reasons:
 
-- **It needs nothing from the C++ core.** Audio runs entirely in the Rust workspace, so work starts without trimming or integrating upstream.
-- **It's useful by itself.** Hearing the PC's audio on the MacBook helps even while keyboard and mouse still run on stock Deskflow.
+- **It needs nothing else first.** Audio runs entirely in the Rust workspace, so work starts with no other feature in place.
+- **It's useful by itself.** Hearing the PC's audio on the MacBook helps even before the trackpad and keyboard can control the PC.
 - **It builds the side channel.** The QUIC connection built for audio is the one logs, config, MCP and touch frames use later.
 - **It settles a big risk early.** Whether `cpal` WASAPI loopback works on the target PC is an open question. The answer decides between `cpal` and miniaudio before anything else depends on it.
 
@@ -36,7 +36,7 @@ Audio streaming (PC → Mac) is the first feature. It comes before the Deskflow 
 | M2 | Side channel | QUIC connection with pinned fingerprints, a control stream and datagrams | M0 |
 | M3 | Audio MVP | PC audio on the MacBook's built-in speakers, with a jitter buffer and drift compensation | M1, M2 |
 | M4 | Audio controls | On/off and volume in a config file, stats in the log | M3 |
-| M5+ | Everything else | Core integration, pairing, UI, logs and config, MCP, Esparrier, touchpad | M2 |
+| M5+ | Everything else | Pairing, UI, logs and config, MCP, touchpad | M2 |
 
 M1 and M2 are independent and can run in parallel.
 
@@ -44,12 +44,11 @@ Each milestone lists its tasks and a **Done when** condition. A milestone is fin
 
 ## M0: Workspace
 
-Set up only what audio needs. Trimming the core build and the UI crates wait until [M5](#later-milestones).
+Set up only what audio needs. The UI crate waits until [M6](#later-milestones).
 
-- [x] crossglide is its own git repo, with Deskflow as a submodule at `upstream/`
-- [x] Upstream builds on the Mac: Deskflow 1.26.0 at `9ac5464e`, Qt 6.11.2 from Homebrew. 27 of 28 unit-test suites pass; `OSXKeyStateTests` needs Accessibility permission because it sends real keystrokes.
+- [x] crossglide is its own git repo. (It began with Deskflow as a submodule at `upstream/`; nothing used it, so it was removed on 2026-09-30 and the project is pure Rust.)
 - [x] Cargo workspace with `crates/audio` (library) and `crates/agent` (binary), following the layout in the design doc
-- [x] `justfile` with `just dev`, `just test`, `just lint` (`cargo fmt --check`, `cargo clippy -D warnings`), `just deny`, and `just core` (fetches the submodule and builds the C++ core; macOS only for now)
+- [x] `justfile` with `just dev`, `just test`, `just lint` (`cargo fmt --check`, `cargo clippy -D warnings`), `just deny`
 - [x] CI builds and tests on `macos-latest` and `windows-latest` (`.github/workflows/ci.yml`); the first run passed on both
 - [x] Dependency check (`cargo deny`: advisories, bans, sources). Licences aren't checked ([Decisions](docs/DESIGN.md#decisions)).
 - [x] `LICENSE` (GPL-2.0) at the repo root
@@ -105,9 +104,9 @@ Tips: `python3 scripts/make-test-audio.py` makes a 10-minute test WAV (a quiet t
 
 ## M2: Side channel
 
-The QUIC connection every later feature shares. The PC connects to the Mac, the same direction as the Deskflow client and server.
+The QUIC connection every later feature shares. The PC connects to the Mac.
 
-- [x] `quinn` endpoint in `crates/agent`: the Mac listens and the PC connects, on one configurable UDP port. The default is 24800: Deskflow uses TCP 24800, and TCP and UDP ports don't collide.
+- [x] `quinn` endpoint in `crates/agent`: the Mac listens and the PC connects, on one configurable UDP port. The default is 24800.
 - [x] Self-signed certificates on each machine, stored next to the agent config: `cert.pem` and `key.pem` (ECDSA P-256; the key readable only by the user) beside `agent.toml`, in `~/Library/Application Support/crossglide` on the Mac and `%APPDATA%\crossglide` on the PC
 - [x] Fingerprint pinning: each side trusts only the peer fingerprint in its config. Fingerprints are copied by hand for now; the pairing code replaces that in M5. TLS checks that the peer holds the key for its certificate; the fingerprint is checked right after the handshake, before any stream is used, so both sides can log a clear line when it's refused.
 - [x] Control stream: versioned hello (protocol and agent version, host, OS, features), then typed request/response messages (`serde` JSON with a 4-byte length prefix). Either side can send requests. A different protocol version is refused; a different agent version only warns.
@@ -246,16 +245,16 @@ These keep the design doc's order after audio. Each gets its own task list when 
 
 | # | Milestone | Summary |
 | --- | --- | --- |
-| M5 | Core and agent | Trimmed build config, agent spawns and supervises `deskflow-core`, pairing code replaces hand-copied fingerprints, Windows service and firewall rules |
+| M5 | Pairing and service | Pairing code replaces hand-copied fingerprints, Windows service and firewall rules |
 | M6 | UI | `tray-icon` menu bar and tray, `egui` settings window, macOS permissions onboarding; audio controls move here |
 | M7 | Logs and config | Merged log timeline, typed shared config, health checks |
 | M8 | MCP | MCP server on the Mac agent, including `audio_status` / `audio_route` |
-| M9 | Esparrier | Detect, configure and flash an ESP32-S3 |
+| M9 | ESP32 input device | On hold: existing firmware speaks Deskflow's protocol, which crossglide doesn't ([design doc](docs/DESIGN.md#idea-on-hold-an-esp32-as-the-pcs-input-device)) |
 | M10 | Touchpad | Brought forward: see [Touchpad](#touchpad-m10-brought-forward) |
 
 ## Touchpad (M10, brought forward)
 
-The Mac's trackpad controls the PC as a native Windows Precision Touchpad, over the existing QUIC connection. Crossglide switches control itself, by screen edge or hotkey, and carries the keyboard too, so Deskflow doesn't need to run.
+The Mac's trackpad controls the PC as a native Windows Precision Touchpad, over the existing QUIC connection. Crossglide switches control itself, by screen edge or hotkey, and carries the keyboard too.
 
 - [x] Virtual precision touchpad driver ([drivers/touchpad](drivers/touchpad/README.md)): UMDF 2, built from the command line with the WDK's NuGet package, and signed with a local certificate. No test-signing mode is needed. Windows reports "Touch/Touchpad Hardware Quality Assurance verification succeeded", and the `inject` example moves the real pointer (2026-09-28).
 - [x] `crates/touch`: contact frames and the tracker, touchpad reports, edge geometry and the return detector, and the key map with the hotkey, all unit-tested. It also has the MultitouchSupport capture and Quartz event tap (Mac) and the feed writer and `SendInput` (PC).
@@ -279,7 +278,7 @@ The Mac's trackpad controls the PC as a native Windows Precision Touchpad, over 
 - [ ] Still to check from the tray itself: the confirmation box, the real UAC prompt (and refusing it), and the menu text afterwards.
 - [ ] Try the edge hint on the Mac: each edge, the hotkey, and a dropped connection; also over a full-screen app and on a second display.
 
-**Done when:** a day of real use on the PC, with the Mac's trackpad and keyboard only, needs no Deskflow and no fallback mouse, and a PC without the driver gets it from the tray menu alone.
+**Done when:** a day of real use on the PC, with the Mac's trackpad and keyboard only, needs no other KVM software and no fallback mouse, and a PC without the driver gets it from the tray menu alone.
 
 ## Latency budget
 
@@ -311,4 +310,4 @@ Measuring: the in-band timestamp plus the clock offset from M2 gives capture-to-
 - [x] Does `cpal` WASAPI loopback work reliably on the target PC? Yes ([M1](#m1-audio-spike)).
 - [ ] Can the PC's speakers be silenced while loopback still captures audio, or does muting the endpoint also mute the capture? Not tested yet. Workaround from M1: make a device with nothing connected (here Digital Output) the default output, so the PC stays silent.
 - [ ] Should audio capture on Windows run in a user-session helper spawned by the service? Probably not: session-0 capture worked in M1 ([Risks](#risks)). Confirm with the real service in M5.
-- [x] One QUIC port, or share one with Deskflow's port number (24800/UDP)? Its own port, 24800/UDP by default: the same number as Deskflow's TCP port, which doesn't collide with it. It's configurable ([M2](#m2-side-channel)).
+- [x] Which port for the QUIC side channel? Its own: 24800/UDP by default, configurable ([M2](#m2-side-channel)).

@@ -41,7 +41,7 @@ Crossglide 目前是 **alpha**,暂时只支持从源码运行,还没有安装包
 | 边缘毛玻璃提示 | 已实现,测试中 |
 | 从托盘安装触摸板驱动(Windows) | 可用,已在 PC 上验证 |
 | 配对码(目前指纹需手动复制) | 计划中 |
-| 剪贴板及 Deskflow 核心的其余功能 | 计划中 |
+| 剪贴板共享 | 尚未开始 |
 
 已在一台 MacBook Air(macOS 26)和一台 Windows 11 电脑(build 26200)上测试,两台机器在同一个 Wi-Fi 下。测量数据和后续计划见 [ROADMAP.md](ROADMAP.md)。
 
@@ -71,8 +71,9 @@ Crossglide 目前是 **alpha**,暂时只支持从源码运行,还没有安装包
 
 - 架构、取舍和每个决定的理由:[docs/DESIGN.md](docs/DESIGN.md)(英文)
 - 里程碑、实测数据和下一步:[ROADMAP.md](ROADMAP.md)(英文)
-- 欢迎提交 issue 和 PR,尤其欢迎其他型号 Mac 和 PC 上的测试报告。提交前请运行 `just lint`、`just test` 和 `just deny`。
+- Crossglide 是独立的纯 Rust 项目:『把指针滑出屏幕、落到另一台机器上』的想法来自 Deskflow、Synergy 这类软件 KVM,但没有共用任何代码或协议。
+- 欢迎提交 issue 和 PR,尤其欢迎其他型号 Mac 和 PC 上的测试报告。提交前请运行 `just lint`、`just test` 和 `just deny`,详见 [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)(英文)。
 
 ## 许可证
 
-[GPL-2.0-only](LICENSE),与 Deskflow 相同。
+[GPL-2.0-only](LICENSE)。
