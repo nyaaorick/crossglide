@@ -12,8 +12,6 @@ The PC's audio plays out of the Mac. All of it runs over one encrypted connectio
 ![Rust](https://img.shields.io/badge/rust-2024-orange.svg)
 ![Status](https://img.shields.io/badge/status-alpha-yellow.svg)
 
-**English** · [简体中文](README.zh-CN.md)
-
 </div>
 
 ---
@@ -28,28 +26,6 @@ Software KVMs move a mouse pointer. Crossglide moves a **touchpad**.
 - **One private connection.** Everything travels over QUIC with pinned certificate fingerprints: touch as low-latency datagrams, keys on a reliable stream, audio as datagrams. No cloud, no account.
 - **A tray app on both machines.** Status at a glance, an audio switch, *Start at login*, and on Windows a one-click **Install touchpad driver**.
 - **Rust all the way down** (apart from the ~500-line Windows driver, which has to be C for now).
-
-## How it works
-
-```mermaid
-flowchart LR
-  subgraph Mac
-    T[MacBook trackpad<br/>raw contacts] --> A[Crossglide]
-    K[Keyboard] --> A
-    S[Speakers]
-  end
-  subgraph PC[Windows PC]
-    B[Crossglide] --> D[Virtual precision<br/>touchpad driver]
-    D --> W[Windows gestures]
-    B --> Y[Keyboard input]
-    L[System audio] --> B
-  end
-  A -- "QUIC: touch, keys" --> B
-  B -- "QUIC: Opus audio" --> A
-  A --> S
-```
-
-The Mac captures finger contacts through Apple's MultitouchSupport framework, swallows its own input while the PC has control, and sends the contacts as datagrams. On the PC the agent turns each frame into a touchpad report for the driver. The design, the trade-offs and the reasoning behind each choice are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Status
 
