@@ -6,10 +6,13 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod autostart;
+mod driver;
+mod hint;
 
 use std::fs::{self, File, TryLockError};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -18,7 +21,9 @@ use crossglide_agent::audio::AudioStatus;
 use crossglide_agent::config;
 use crossglide_agent::identity::Identity;
 use crossglide_agent::link::{self, Mode, Settings, Status};
+use crossglide_agent::touch::{self, Hint};
 use crossglide_audio::device::Source;
+use hint::HintWindow;
 use tao::event::{Event, StartCause};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tokio::runtime::Runtime;
@@ -37,6 +42,10 @@ const LOCK_FILE: &str = "crossglide.lock";
 const LINE: usize = 90;
 
 fn main() {
+    // The elevated copy the tray starts to install the touchpad driver: no tray, no lock.
+    if std::env::args().any(|arg| arg == driver::FLAG) {
+        std::process::exit(driver::run_elevated());
+    }
     let dir = match config::default_dir() {
         Ok(dir) => dir,
         Err(e) => return eprintln!("error: {e:#}"),
@@ -267,9 +276,18 @@ struct Tray {
     open_log: MenuItem,
     open_config: MenuItem,
     login: CheckMenuItem,
+    driver: MenuItem,
     quit: MenuItem,
     shown: Option<View>,
 }
+
+/// The driver item's text: the Mac's is greyed out, the way "Start at login" is where it isn't
+/// supported.
+const DRIVER_ITEM: &str = if driver::supported() {
+    "Install touchpad driver…"
+} else {
+    "Install touchpad driver (Windows only)"
+};
 
 impl Tray {
     fn new(audio: bool) -> Result<Self> {
@@ -284,6 +302,7 @@ impl Tray {
             autostart::enabled(),
             None,
         );
+        let driver = MenuItem::new(DRIVER_ITEM, driver::supported(), None);
         let quit = MenuItem::new("Quit Crossglide", true, None);
         let menu = Menu::new();
         menu.append(&headline)?;
@@ -293,6 +312,7 @@ impl Tray {
         menu.append(&open_log)?;
         menu.append(&open_config)?;
         menu.append(&login)?;
+        menu.append(&driver)?;
         menu.append(&PredefinedMenuItem::separator())?;
         menu.append(&quit)?;
         let icon = TrayIconBuilder::new()
@@ -308,6 +328,7 @@ impl Tray {
             open_log,
             open_config,
             login,
+            driver,
             quit,
             shown: None,
         })
@@ -332,9 +353,18 @@ impl Tray {
     }
 }
 
+/// What wakes the event loop from other threads.
+enum UiEvent {
+    Menu(MenuEvent),
+    /// The Mac's edge hint should show, or go away.
+    Hint(Option<Hint>),
+    /// The touchpad driver install finished, with this text for its menu item.
+    Driver(String),
+}
+
 fn run(mut agent: Agent, dir: PathBuf) -> ! {
     #[allow(unused_mut)]
-    let mut event_loop = EventLoopBuilder::<MenuEvent>::with_user_event().build();
+    let mut event_loop = EventLoopBuilder::<UiEvent>::with_user_event().build();
     #[cfg(target_os = "macos")]
     {
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
@@ -342,12 +372,21 @@ fn run(mut agent: Agent, dir: PathBuf) -> ! {
         event_loop.set_activation_policy(ActivationPolicy::Accessory);
     }
     let proxy = event_loop.create_proxy();
+    let menu_proxy = proxy.clone();
     MenuEvent::set_event_handler(Some(move |event| {
-        let _ = proxy.send_event(event);
+        let _ = menu_proxy.send_event(UiEvent::Menu(event));
     }));
+    let driver_proxy = proxy.clone();
+    let proxy = Mutex::new(proxy);
+    touch::on_hint(move |hint| {
+        if let Ok(proxy) = proxy.lock() {
+            let _ = proxy.send_event(UiEvent::Hint(hint));
+        }
+    });
 
     let mut tray: Option<Tray> = None;
-    event_loop.run(move |event, _, control_flow| {
+    let mut hint_window = HintWindow::default();
+    event_loop.run(move |event, target, control_flow| {
         *control_flow = ControlFlow::WaitUntil(Instant::now() + REFRESH);
         match event {
             // The tray icon can only be made once the event loop runs.
@@ -362,7 +401,14 @@ fn run(mut agent: Agent, dir: PathBuf) -> ! {
                     return;
                 }
             },
-            Event::UserEvent(menu) => {
+            Event::UserEvent(UiEvent::Hint(hint)) => hint_window.set(target, hint),
+            Event::UserEvent(UiEvent::Driver(text)) => {
+                if let Some(tray) = &tray {
+                    tray.driver.set_text(text);
+                    tray.driver.set_enabled(true);
+                }
+            }
+            Event::UserEvent(UiEvent::Menu(menu)) => {
                 let Some(tray) = &tray else { return };
                 if menu.id == *tray.audio.id() {
                     agent.audio = tray.audio.is_checked();
@@ -385,6 +431,21 @@ fn run(mut agent: Agent, dir: PathBuf) -> ! {
                             tray.login.set_checked(!on);
                         }
                     }
+                } else if menu.id == *tray.driver.id() {
+                    // Off until it's over, so a second click can't start a second install.
+                    tray.driver.set_enabled(false);
+                    info!("installing the touchpad driver");
+                    let proxy = driver_proxy.clone();
+                    driver::start(move |result| {
+                        let text = match result {
+                            Ok(()) => "Touchpad driver installed (install again)".to_string(),
+                            Err(e) => {
+                                error!("touchpad driver: {e:#}");
+                                format!("Install touchpad driver… (failed: {e})")
+                            }
+                        };
+                        let _ = proxy.send_event(UiEvent::Driver(short(&text, LINE)));
+                    });
                 } else if menu.id == *tray.quit.id() {
                     info!("quitting");
                     agent.stop();

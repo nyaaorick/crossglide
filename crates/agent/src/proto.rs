@@ -8,13 +8,15 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+use crossglide_touch::edge::Edge;
+
 use crate::clock::Nanos;
 
 /// Version of the control-stream protocol. Agents only talk to the same version.
 pub const PROTOCOL: u32 = 1;
 
 /// Optional features this agent supports. One is used only when both sides list it.
-const FEATURES: &[&str] = &[crate::audio::FEATURE];
+const FEATURES: &[&str] = &[crate::audio::FEATURE, crate::touch::FEATURE];
 
 /// Largest message either side accepts.
 const MAX_FRAME: usize = 1 << 20;
@@ -85,6 +87,21 @@ pub enum Request {
     /// From the PC, every few seconds while sending: the audio frame with timestamp `ts` was
     /// captured at `at` on the PC's session clock. The Mac measures latency from it.
     AudioMark { ts: u32, at: Nanos },
+    /// From the Mac: control moves to the PC. `entry` is the PC edge the pointer comes in
+    /// through and how far along it, or none to leave the pointer where it is (the hotkey);
+    /// `returns` are the PC edges that lead back to the Mac.
+    TouchEnter {
+        entry: Option<(Edge, f64)>,
+        returns: Vec<Edge>,
+    },
+    /// From the Mac: control is back on the Mac (the hotkey).
+    TouchLeave,
+    /// From the PC: the pointer was pushed through `edge`, `along` the way, so control goes
+    /// back to the Mac.
+    TouchReturn { edge: Edge, along: f64 },
+    /// From the Mac while the PC has control: a key went down or up. `code` is its Windows
+    /// scan code, with `0xE0` in the high byte for extended keys.
+    Key { code: u16, down: bool },
     /// A request this agent doesn't know. Answered with an error.
     #[serde(other)]
     Unknown,

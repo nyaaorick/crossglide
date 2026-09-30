@@ -1,0 +1,74 @@
+; Crossglide virtual precision touchpad: a UMDF 2 HID minidriver on a root-enumerated device.
+; build.ps1 builds, signs and installs it; see README.md.
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = HIDClass
+ClassGuid   = {745a17a0-74d3-11d0-b6fe-00a0c90f57da}
+Provider    = %Provider%
+CatalogFile = crossglide-touchpad.cat
+DriverVer   = 09/28/2026,0.1.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%
+
+[SourceDisksFiles]
+crossglide-touchpad.dll = 1
+
+[Manufacturer]
+%Provider% = Crossglide, NTamd64
+
+[Crossglide.NTamd64]
+%DeviceDesc% = Touchpad, Root\CrossglideTouchpad
+
+[Touchpad.NT]
+CopyFiles = Touchpad_Files
+
+[Touchpad_Files]
+crossglide-touchpad.dll
+
+[Touchpad.NT.HW]
+AddReg = Touchpad_AddReg
+
+[Touchpad_AddReg]
+HKR,,"LowerFilters",0x00010008,"WUDFRd" ; FLG_ADDREG_TYPE_MULTI_SZ | FLG_ADDREG_APPEND
+
+[Touchpad.NT.Services]
+AddService = mshidumdf, 0x000001fa, mshidumdf_ServiceInstall ; 0x2: the device's function driver
+AddService = WUDFRd, 0x000001f8, WUDFRd_ServiceInstall       ; the UMDF reflector, a filter
+
+[mshidumdf_ServiceInstall]
+ServiceType   = 1 ; SERVICE_KERNEL_DRIVER
+StartType     = 3 ; SERVICE_DEMAND_START
+ErrorControl  = 1 ; SERVICE_ERROR_NORMAL
+ServiceBinary = %12%\mshidumdf.sys
+
+[WUDFRd_ServiceInstall]
+DisplayName   = %WudfRdDisplayName%
+ServiceType   = 1
+StartType     = 3
+ErrorControl  = 1
+ServiceBinary = %12%\WUDFRd.sys
+
+[Touchpad.NT.Wdf]
+UmdfService                = CrossglideTouchpad, CrossglideTouchpad_Install
+UmdfServiceOrder           = CrossglideTouchpad
+UmdfKernelModeClientPolicy = AllowKernelModeClients
+UmdfFileObjectPolicy       = AllowNullAndUnknownFileObjects
+UmdfMethodNeitherAction    = Copy
+UmdfFsContextUsePolicy     = CanUseFsContext2
+UmdfHostPriority           = PriorityHigh
+
+[CrossglideTouchpad_Install]
+UmdfLibraryVersion = 2.15.0
+ServiceBinary      = %13%\crossglide-touchpad.dll
+
+[Strings]
+Provider          = "Crossglide"
+DiskName          = "Crossglide Touchpad Installation Disk"
+DeviceDesc        = "Crossglide Virtual Touchpad"
+WudfRdDisplayName = "Windows Driver Foundation - User-mode Driver Framework Reflector"

@@ -36,6 +36,11 @@ core:
     [ -f build/upstream/build.ninja ] || cmake -S upstream -B build/upstream -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_INSTALLER=OFF -DSKIP_BUILD_TESTS=ON -DCMAKE_PREFIX_PATH="$(brew --prefix qt);$(brew --prefix openssl@3)"
     cmake --build build/upstream
 
+# Build, sign and install the virtual precision touchpad driver (Windows, administrator)
+[windows]
+touchpad-driver *args:
+    powershell -ExecutionPolicy Bypass -File drivers\touchpad\build.ps1 {{args}}
+
 [windows]
 core:
     Write-Error "Building the Deskflow core on Windows isn't set up yet (planned for M5)"; exit 1

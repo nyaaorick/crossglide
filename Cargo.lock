@@ -501,6 +501,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crossglide-audio",
+ "crossglide-touch",
  "dirs",
  "gethostname",
  "quinn",
@@ -542,18 +543,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossglide-touch"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "crossglide-ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossglide-agent",
  "crossglide-audio",
+ "crossglide-touch",
  "dirs",
  "tao",
  "tokio",
  "tokio-util",
  "tracing",
  "tray-icon",
+ "window-vibrancy",
+ "windows-sys 0.61.2",
  "winreg",
 ]
 
@@ -1692,6 +1704,7 @@ dependencies = [
  "objc2",
  "objc2-core-foundation",
  "objc2-foundation",
+ "objc2-quartz-core",
 ]
 
 [[package]]
@@ -3243,6 +3256,22 @@ name = "winapi-x86_64-pc-windows-gnu"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
+
+[[package]]
+name = "window-vibrancy"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "111e51caca442cafd9bab396628ac4d814880eaea4e63dfd76a12e9f342b5580"
+dependencies = [
+ "objc2",
+ "objc2-app-kit",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "objc2-quartz-core",
+ "raw-window-handle",
+ "windows-sys 0.61.2",
+ "windows-version",
+]
 
 [[package]]
 name = "windowfunctions"

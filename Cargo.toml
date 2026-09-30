@@ -11,6 +11,7 @@ publish = false
 [workspace.dependencies]
 crossglide-agent = { path = "crates/agent" }
 crossglide-audio = { path = "crates/audio" }
+crossglide-touch = { path = "crates/touch" }
 
 # Everything runs from source as a dev build (no per-platform release builds until the app is
 # mature), and dev builds play real-time audio and simulate minutes of it, which the unoptimized

@@ -8,18 +8,19 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use crossglide_audio::device::Source;
 use quinn::{ClientConfig, Connection, ConnectionError, Endpoint, Incoming, ServerConfig};
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
-use crate::audio::{self, AudioStatus};
+use crate::audio::{self, AbortOnDrop, AudioStatus};
 use crate::clock::{self, Sample, SessionClock};
 use crate::config::Role;
-use crate::control;
+use crate::control::{self, Handled};
 use crate::identity::{Fingerprint, Identity};
 use crate::proto::{Hello, PROTOCOL};
 use crate::tls;
+use crate::touch::{self, TouchSettings};
 
 /// This machine's end of the side channel.
 #[derive(Clone, Debug)]
@@ -38,6 +39,9 @@ pub struct Settings {
     pub peer: Fingerprint,
     /// Audio on or off, and what to send when this side sends (the PC).
     pub audio: Option<Source>,
+    /// The Mac's `[touch]` settings, `None` with touch off. The PC takes touch whenever its
+    /// virtual touchpad is installed.
+    pub touch: Option<TouchSettings>,
 }
 
 /// What the rest of the agent sees of the side channel.
@@ -96,8 +100,14 @@ pub async fn run(
         peer: settings.peer,
         ours: settings.identity.fingerprint,
         audio: settings.audio,
+        touch: settings.touch.clone(),
         status,
     });
+    if role == Role::Listen
+        && let Some(touch) = &settings.touch
+    {
+        touch::prepare(touch);
+    }
     match settings.mode {
         Mode::Listen(addr) => {
             listen(addr, tls::server_config(&settings.identity)?, ctx, stop).await
@@ -115,6 +125,7 @@ struct Ctx {
     peer: Fingerprint,
     ours: Fingerprint,
     audio: Option<Source>,
+    touch: Option<TouchSettings>,
     status: watch::Sender<Status>,
 }
 
@@ -339,6 +350,7 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
 
     let session_clock = SessionClock::start();
     let (control, requests, serve) = control::serve(stream, session_clock);
+    let (requests, touch_requests, _route) = route(requests);
     let (peer_clock, peer_clock_rx) = watch::channel(None);
     let update_clock = |estimate| {
         peer_clock.send_replace(Some(estimate));
@@ -386,11 +398,33 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
         // Runs until the control stream closes, which `serve` reports.
         std::future::pending::<()>().await
     };
+    let touch = async {
+        let session = touch::Session {
+            conn: conn.clone(),
+            control: control.clone(),
+            peer: hello.host.clone(),
+        };
+        if features.iter().any(|f| f == touch::FEATURE) {
+            let listening = ctx.role == Role::Listen;
+            touch::serve(session, ctx.touch.as_ref(), listening, touch_requests).await;
+        } else {
+            if ctx.role == Role::Listen && ctx.touch.is_some() {
+                info!(
+                    "touch: {} doesn't support touch; update crossglide there",
+                    hello.host
+                );
+            }
+            touch::idle(touch_requests, "the other machine doesn't support touch").await;
+        }
+        // Runs until the control stream closes, which `serve` reports.
+        std::future::pending::<()>().await
+    };
     let served = tokio::select! {
         biased;
         served = serve => served,
         () = clock::probe(&control, &session_clock, &hello.host, update_clock) => Ok(()),
         () = audio => Ok(()),
+        () = touch => Ok(()),
     };
     if conn.close_reason().is_none() {
         if let Err(e) = &served {
@@ -414,6 +448,31 @@ async fn session(conn: Connection, ctx: &Ctx) -> bool {
         warn!("disconnected from {}: {why}", hello.host);
     }
     true
+}
+
+/// Splits the peer's requests between audio and touch. The returned task forwards them until
+/// the control stream closes; a feature that's off has dropped its receiver, and a request it
+/// can't take is answered with an error when its reply is dropped.
+fn route(
+    mut requests: mpsc::Receiver<Handled>,
+) -> (
+    mpsc::Receiver<Handled>,
+    mpsc::Receiver<Handled>,
+    AbortOnDrop,
+) {
+    let (audio, audio_requests) = mpsc::channel(64);
+    let (touch, touch_requests) = mpsc::channel(64);
+    let task = tokio::spawn(async move {
+        while let Some(handled) = requests.recv().await {
+            let to = if touch::handles(&handled.0) {
+                &touch
+            } else {
+                &audio
+            };
+            let _ = to.send(handled).await;
+        }
+    });
+    (audio_requests, touch_requests, AbortOnDrop(task))
 }
 
 /// A connection that failed or closed before the hellos, explained for the log.
@@ -539,6 +598,7 @@ mod tests {
                 identity: identity.clone(),
                 peer: peer.fingerprint,
                 audio: None,
+                touch: None,
             };
             let task = tokio::spawn(run(settings, sender, stop.clone()));
             Self { status, stop, task }

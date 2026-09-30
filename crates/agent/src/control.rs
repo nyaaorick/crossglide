@@ -41,6 +41,16 @@ struct Outgoing {
 pub type Handled = (Request, oneshot::Sender<Response>);
 
 impl Control {
+    /// Sends a request without waiting for its answer. Requests sent from one task arrive in
+    /// the order they were sent.
+    pub async fn send(&self, body: Request) -> Result<()> {
+        let (reply, _) = oneshot::channel();
+        self.requests
+            .send(Outgoing { body, reply })
+            .await
+            .map_err(|_| anyhow!("the control stream is closed"))
+    }
+
     pub async fn request(&self, body: Request) -> Result<Reply> {
         let (reply, answer) = oneshot::channel();
         self.requests
@@ -78,8 +88,9 @@ pub fn serve(
     mpsc::Receiver<Handled>,
     impl Future<Output = Result<()>>,
 ) {
-    let (requests, outgoing) = mpsc::channel(16);
-    let (handler, handled) = mpsc::channel(16);
+    // Room for a burst of keystrokes; a request that finds the handlers' queue full is refused.
+    let (requests, outgoing) = mpsc::channel(64);
+    let (handler, handled) = mpsc::channel(64);
     (
         Control { requests },
         handled,

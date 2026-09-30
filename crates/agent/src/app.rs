@@ -67,6 +67,7 @@ pub fn load_settings(dir: &Path, identity: Identity, audio: Option<Source>) -> R
         peer: config.peer_fingerprint().with_context(context)?,
         identity,
         audio,
+        touch: config.touch().with_context(context)?,
     };
     info!(
         "crossglide-agent {} on {}; this machine's fingerprint is {}",

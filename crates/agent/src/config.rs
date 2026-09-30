@@ -5,10 +5,13 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use crossglide_touch::edge::Edge;
+use crossglide_touch::keymap::{CommandKey, Hotkey};
 use serde::Deserialize;
 
 use crate::identity::Fingerprint;
 use crate::link::Mode;
+use crate::touch::TouchSettings;
 
 pub const FILE: &str = "agent.toml";
 
@@ -36,6 +39,33 @@ pub struct Config {
     pub server: String,
     #[serde(default)]
     pub peer_fingerprint: String,
+    #[serde(default)]
+    pub touch: TouchConfig,
+}
+
+/// `[touch]`: the Mac's trackpad and keyboard controlling the PC. Only the Mac reads it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct TouchConfig {
+    pub enabled: bool,
+    /// Sides of the Mac's screen that lead to the PC; pushing the pointer through one moves
+    /// control there, and the PC's opposite side leads back. Empty for the hotkey only.
+    pub edges: Vec<Edge>,
+    /// Moves control to the PC and back.
+    pub hotkey: String,
+    /// What the Command keys are on the PC.
+    pub command: CommandKey,
+}
+
+impl Default for TouchConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            edges: vec![Edge::Left, Edge::Right],
+            hotkey: Hotkey::DEFAULT.to_string(),
+            command: CommandKey::Win,
+        }
+    }
 }
 
 fn default_port() -> u16 {
@@ -82,6 +112,19 @@ impl Config {
         })
     }
 
+    /// The touch settings, or `None` with touch turned off.
+    pub fn touch(&self) -> Result<Option<TouchSettings>> {
+        let touch = &self.touch;
+        if !touch.enabled {
+            return Ok(None);
+        }
+        Ok(Some(TouchSettings {
+            edges: touch.edges.clone(),
+            hotkey: touch.hotkey.parse().context("in [touch]")?,
+            command: touch.command,
+        }))
+    }
+
     pub fn peer_fingerprint(&self) -> Result<Fingerprint> {
         if self.peer_fingerprint.trim().is_empty() {
             bail!(
@@ -124,7 +167,19 @@ server = ""
 # The other machine's certificate fingerprint: run `just dev fingerprint` on the
 # other machine and paste its output here.
 peer_fingerprint = ""
-"#
+
+# The Mac's trackpad and keyboard controlling the PC, which sees a precision
+# touchpad (install drivers/touchpad on the PC first). Only the Mac reads this.
+[touch]
+enabled = true
+# Sides of the Mac's screen the PC is on: "left", "right", "top", "bottom".
+edges = ["left", "right"]
+# Moves control to the PC and back.
+hotkey = "{hotkey}"
+# The Command keys on the PC: "win" (as in Deskflow) or "ctrl" (Cmd-C copies).
+command = "win"
+"#,
+        hotkey = Hotkey::DEFAULT
     )
 }
 
@@ -161,6 +216,34 @@ mod tests {
             Mode::Listen(_) => panic!("expected connect"),
         }
         assert!(config.peer_fingerprint().is_ok());
+    }
+
+    #[test]
+    fn touch_defaults_and_settings() {
+        let config = parse("role = \"listen\"");
+        let touch = config.touch().unwrap().unwrap();
+        assert_eq!(touch.edges, [Edge::Left, Edge::Right]);
+        assert_eq!(touch.hotkey, Hotkey::DEFAULT.parse().unwrap());
+
+        let config = parse(
+            "role = \"listen\"\n[touch]\nedges = [\"top\"]\nhotkey = \"cmd+f1\"\ncommand = \"ctrl\"",
+        );
+        let touch = config.touch().unwrap().unwrap();
+        assert_eq!(touch.edges, [Edge::Top]);
+        assert_eq!(touch.command, CommandKey::Ctrl);
+
+        assert!(
+            parse("role = \"listen\"\n[touch]\nhotkey = \"f1\"")
+                .touch()
+                .is_err()
+        );
+        assert!(
+            parse("role = \"listen\"\n[touch]\nenabled = false")
+                .touch()
+                .unwrap()
+                .is_none()
+        );
+        assert!(toml::from_str::<Config>("role = \"listen\"\n[touch]\nedge = []").is_err());
     }
 
     #[test]

@@ -366,7 +366,7 @@ fn unsupported() -> Response {
 }
 
 /// Stops a task when dropped.
-struct AbortOnDrop(JoinHandle<()>);
+pub(crate) struct AbortOnDrop(pub(crate) JoinHandle<()>);
 
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {

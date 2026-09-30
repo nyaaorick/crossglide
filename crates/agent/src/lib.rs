@@ -11,6 +11,7 @@ pub mod identity;
 pub mod link;
 pub mod proto;
 pub mod tls;
+pub mod touch;
 
 /// This machine's name, for hellos, logs and the certificate.
 pub fn hostname() -> String {
