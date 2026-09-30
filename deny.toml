@@ -1,5 +1,5 @@
 # cargo-deny config: `just deny` checks advisories, bans and sources.
-# Dependency licences aren't checked; see "Licence" in README.md's Decisions.
+# Dependency licences aren't checked; see "Licence" in docs/DESIGN.md's Decisions.
 
 [graph]
 targets = [

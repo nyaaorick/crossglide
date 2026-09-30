@@ -1,6 +1,6 @@
 # Crossglide roadmap
 
-*Draft as of 2026-09-25 · builds on the design in [README.md](README.md)*
+*Draft as of 2026-09-25 · builds on the design in [docs/DESIGN.md](docs/DESIGN.md)*
 
 Audio streaming (PC → Mac) is the first feature. It comes before the Deskflow core, pairing and UI work for four reasons:
 
@@ -22,9 +22,10 @@ Audio streaming (PC → Mac) is the first feature. It comes before the Deskflow 
 7. [Tray app (early M6)](#tray-app-early-m6)
 8. [After the audio MVP](#after-the-audio-mvp)
 9. [Later milestones](#later-milestones)
-10. [Latency budget](#latency-budget)
-11. [Risks](#risks)
-12. [Open questions](#open-questions)
+10. [Touchpad (M10, brought forward)](#touchpad-m10-brought-forward)
+11. [Latency budget](#latency-budget)
+12. [Risks](#risks)
+13. [Open questions](#open-questions)
 
 ## Overview
 
@@ -47,17 +48,17 @@ Set up only what audio needs. Trimming the core build and the UI crates wait unt
 
 - [x] crossglide is its own git repo, with Deskflow as a submodule at `upstream/`
 - [x] Upstream builds on the Mac: Deskflow 1.26.0 at `9ac5464e`, Qt 6.11.2 from Homebrew. 27 of 28 unit-test suites pass; `OSXKeyStateTests` needs Accessibility permission because it sends real keystrokes.
-- [x] Cargo workspace with `crates/audio` (library) and `crates/agent` (binary), following the layout in the README
+- [x] Cargo workspace with `crates/audio` (library) and `crates/agent` (binary), following the layout in the design doc
 - [x] `justfile` with `just dev`, `just test`, `just lint` (`cargo fmt --check`, `cargo clippy -D warnings`), `just deny`, and `just core` (fetches the submodule and builds the C++ core; macOS only for now)
 - [x] CI builds and tests on `macos-latest` and `windows-latest` (`.github/workflows/ci.yml`); the first run passed on both
-- [x] Dependency check (`cargo deny`: advisories, bans, sources). Licences aren't checked ([Decisions](README.md#decisions)).
+- [x] Dependency check (`cargo deny`: advisories, bans, sources). Licences aren't checked ([Decisions](docs/DESIGN.md#decisions)).
 - [x] `LICENSE` (GPL-2.0) at the repo root
 
 **Done when:** a fresh clone builds and passes `just test` on both machines and in CI. Done: it passes on the Mac, on the PC and in CI.
 
 ## M1: Audio spike
 
-Small, throwaway binaries that answer "does this work on our hardware?" before any architecture is built on it. Findings go into [Decisions](README.md#decisions) in the README.
+Small, throwaway binaries that answer "does this work on our hardware?" before any architecture is built on it. Findings go into [Decisions](docs/DESIGN.md#decisions) in the design doc.
 
 The spike is one binary, `crates/spike`, run as `just spike <command>`: `capture`, `play`, `opus`, `send` and `recv`. It uses `cpal` 0.18 and `opus` 0.4. `send` can also stream a sine or a WAV instead of loopback, and `--drop-every N` simulates loss.
 
@@ -221,6 +222,8 @@ A minimal tray app, brought forward from M6 so the Mac and PC setup can be used 
 
 The menu shows the connection and the audio state (device, and latency on the Mac), and has: Audio on/off (reconnects; not remembered after a restart), Open log, Open config folder, Start at login (a `Run` registry value on Windows, a LaunchAgent on macOS, pointing at the exe that set it), and Quit, which tells the other machine it's stopping. The log goes to the terminal and to `agent.log`. Only one copy runs per user.
 
+Coming with the touchpad work (see [Touchpad](#touchpad-m10-brought-forward)): a Mac-only frosted-glass hint over the edge the pointer left through, and an *Install touchpad driver* item (greyed out with "(Windows only)" on the Mac). Start at login already exists; it isn't duplicated, but touch has to work when the app starts that way.
+
 Not in it yet: settings or pairing in the UI (edit `agent.toml`), remembering audio off, an app icon, release builds or an installer. Until it's mature it runs from source only; release builds (no console window on Windows) and packaging come last.
 
 **Running it:** from source, a debug build. On the Mac, double-click `scripts/tray.command` (it opens Terminal), or run `just tray`. On Windows, drag `scripts\tray.ps1` into a PowerShell window and press Enter; it first stops any copy already running, so it doubles as a restart after a code change. Run either the tray app or `just dev` on a machine, not both.
@@ -239,7 +242,7 @@ Not planned in detail. Each item is picked up only once the MVP has been used da
 
 ## Later milestones
 
-These keep the README's order after audio. Each gets its own task list when it's next.
+These keep the design doc's order after audio. Each gets its own task list when it's next.
 
 | # | Milestone | Summary |
 | --- | --- | --- |
@@ -248,7 +251,35 @@ These keep the README's order after audio. Each gets its own task list when it's
 | M7 | Logs and config | Merged log timeline, typed shared config, health checks |
 | M8 | MCP | MCP server on the Mac agent, including `audio_status` / `audio_route` |
 | M9 | Esparrier | Detect, configure and flash an ESP32-S3 |
-| M10 | Touchpad | MultitouchSupport capture, contact frames over datagrams, virtual precision touchpad (riskiest, so last) |
+| M10 | Touchpad | Brought forward: see [Touchpad](#touchpad-m10-brought-forward) |
+
+## Touchpad (M10, brought forward)
+
+The Mac's trackpad controls the PC as a native Windows Precision Touchpad, over the existing QUIC connection. Crossglide switches control itself, by screen edge or hotkey, and carries the keyboard too, so Deskflow doesn't need to run.
+
+- [x] Virtual precision touchpad driver ([drivers/touchpad](drivers/touchpad/README.md)): UMDF 2, built from the command line with the WDK's NuGet package, and signed with a local certificate. No test-signing mode is needed. Windows reports "Touch/Touchpad Hardware Quality Assurance verification succeeded", and the `inject` example moves the real pointer (2026-09-28).
+- [x] `crates/touch`: contact frames and the tracker, touchpad reports, edge geometry and the return detector, and the key map with the hotkey, all unit-tested. It also has the MultitouchSupport capture and Quartz event tap (Mac) and the feed writer and `SendInput` (PC).
+- [x] Agent: the `touch` feature in the hello, `[touch]` in `agent.toml`, frames as datagrams, and `TouchEnter`, `TouchLeave`, `TouchReturn` and `Key` on the control stream. The PC lifts every finger when frames stop for 250 ms, and releases every key when control leaves or the connection drops.
+- [ ] Try it on the real machines: pointer, tap, click and drag, two-finger scroll, pinch, three- and four-finger swipes, typing, and switching by each edge and by the hotkey.
+- [ ] Measure latency from trackpad to pointer; the budget is 20 ms.
+- [ ] Check that macOS's own three- and four-finger gestures (Spaces, Mission Control) stay on the Mac while the PC has control; the event tap may not swallow them.
+
+**Edge hint** (all Rust; the driver stays C). Returning stays as it is: the PC's side opposite any configured edge brings control back. Start at login already exists and needs no work.
+
+- [x] **Hint window.** A borderless, transparent, click-through, always-on-top window in the tray app's `tao` event loop, blurred with `window-vibrancy` (fallback: `objc2-app-kit`), 28 pt wide, no fade and no config. `edge::strip_rect(display, edge)` places it (unit-tested for all four edges).
+- [x] **Agent to window.** `TapEvent::Edge` carries the display the pointer left from. The agent gets an optional callback in its settings, called on `Local::activate` (show, with the edge and display) and `Local::deactivate` (hide), which every route back goes through. The tray forwards it to its event loop; the plain `crossglide-agent` command has none.
+
+**Installing the driver from the tray (Windows only)** (design in the [design doc](docs/DESIGN.md#installing-the-driver-from-the-tray)). The signed package is committed in the repo, so a `git pull` is all a PC needs:
+
+- [x] Checked on the PC (Windows 11 build 26200, 2026-09-30): `pnputil` has `/add-driver … /install` but no `/add-device`, so the root device is created with SetupAPI.
+- [x] Copy `target\touchpad\package` (DLL, `.inf`, `.cat`) and the exported public `.cer` into `drivers/touchpad/package/`, and commit them.
+- [x] `crates/ui/src/driver.rs` (Windows): embed the four files with `include_bytes!`; on the menu item, confirm, then relaunch elevated with `runas` and `--install-driver`; the helper writes them into `%ProgramFiles%\Crossglide\driver`, runs `certutil -addstore` for Root and TrustedPublisher, creates the root device with SetupAPI if missing, runs `pnputil /add-driver … /install`, and reports through its exit code and the log. Non-Windows stub: "Windows only".
+- [x] The menu item: one item on both OSes, greyed out and labelled "(Windows only)" elsewhere (the `autostart::supported()` pattern). Point the agent's "touchpad isn't installed" message at it.
+- [x] Checked on the PC (2026-09-30), running the elevated helper over SSH, which is elevated: installing over the installed driver exits 0 (`pnputil` exits 259, "up to date", which counts as success); after `pnputil /remove-device` it creates the device and the driver binds (`Status OK`).
+- [ ] Still to check from the tray itself: the confirmation box, the real UAC prompt (and refusing it), and the menu text afterwards.
+- [ ] Try the edge hint on the Mac: each edge, the hotkey, and a dropped connection; also over a full-screen app and on a second display.
+
+**Done when:** a day of real use on the PC, with the Mac's trackpad and keyboard only, needs no Deskflow and no fallback mouse, and a PC without the driver gets it from the tray menu alone.
 
 ## Latency budget
 
