@@ -117,7 +117,7 @@ The PC needs no full GUI. Today it runs the tray app, which runs the agent in th
 | Tray app (with the agent) | Rust | Per user, at login | Status, audio switch, touch injection, driver install |
 | Virtual precision touchpad | C driver (UMDF 2), installed by the Rust tray | Driver | Turns touch frames into precision touchpad input (optional; see the ESP32 idea) |
 
-- **First run:** run one command on the PC; it shows a pairing code. Enter the code on the Mac, which pushes the server address and trusted fingerprints to the PC (planned).
+- **First run:** run one command on the PC; it shows a pairing code. Enter the code on the Mac, which pushes the trusted fingerprints to the PC (planned). The PC already finds the Mac by itself: before each connection attempt it broadcasts a probe naming the fingerprint it pins, and the Mac with that fingerprint answers on the side channel port plus one.
 - **Firewall:** the agent adds a Windows Firewall rule for the QUIC port, Private networks only (planned).
 - **Login screen and UAC prompts:** input sent from a user-session program can't reach them. Running the agent as a Windows service, with a helper in the user's session, would (planned; see [Open questions](#open-questions)).
 - **Version check:** see [Transport](#transport): the hello refuses a different protocol and warns on a different agent version.

@@ -55,8 +55,8 @@ pub fn load_settings(dir: &Path, identity: Identity, audio: Option<Source>) -> R
     let path = dir.join(config::FILE);
     let Some(config) = Config::load_or_init(&path)? else {
         bail!(
-            "created {}: fill in peer_fingerprint (and server, on the PC), then run again. This \
-             machine's fingerprint is {}",
+            "created {}: fill in peer_fingerprint, then run again. This machine's fingerprint \
+             is {}",
             path.display(),
             identity.fingerprint
         );

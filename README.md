@@ -54,7 +54,7 @@ You need two machines on the same network: a **MacBook** and a **Windows 11 PC**
 1. Install [Rust](https://rustup.rs), [`just`](https://github.com/casey/just), CMake and git. On Windows also install the Visual Studio C++ Build Tools (Rust's installer offers them).
 2. `git clone https://github.com/nyaaorick/crossglide.git && cd crossglide`
 3. Run `just dev fingerprint` and note this machine's fingerprint.
-4. Run `just dev` once. It writes a commented `agent.toml` and stops. In each one, set `peer_fingerprint` to the *other* machine's fingerprint; on the PC, also set `server` to the Mac's IP address.
+4. Run `just dev` once. It writes a commented `agent.toml` and stops. In each one, set `peer_fingerprint` to the *other* machine's fingerprint. The PC finds the Mac on the local network by itself (UDP ports 24800 and 24801), so there's no IP address to type in; `server` is only needed if the Mac is on another network.
 
 **Then start the tray app**
 

@@ -1,11 +1,12 @@
 //! The side channel's QUIC connection. The Mac listens and the PC connects; the PC reconnects
-//! with backoff when either side restarts or the network drops.
+//! with backoff when either side restarts or the network drops, finding the Mac on the local
+//! network again each time, so a new IP address for the Mac doesn't strand it.
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use crossglide_audio::device::Source;
 use quinn::{ClientConfig, Connection, ConnectionError, Endpoint, Incoming, ServerConfig};
 use tokio::sync::{mpsc, watch};
@@ -17,6 +18,7 @@ use crate::audio::{self, AbortOnDrop, AudioStatus};
 use crate::clock::{self, Sample, SessionClock};
 use crate::config::Role;
 use crate::control::{self, Handled};
+use crate::discover;
 use crate::identity::{Fingerprint, Identity};
 use crate::proto::{Hello, PROTOCOL};
 use crate::tls;
@@ -27,8 +29,9 @@ use crate::touch::{self, TouchSettings};
 pub enum Mode {
     /// Accept connections on this address (the Mac).
     Listen(SocketAddr),
-    /// Connect to this host and port (the PC).
-    Connect { host: String, port: u16 },
+    /// Connect to the Mac on this port (the PC): wherever it answers on the local network, or
+    /// else at `server`.
+    Connect { server: Option<String>, port: u16 },
 }
 
 #[derive(Clone)]
@@ -82,6 +85,8 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(5);
 /// answer also waits `tls::IDLE_TIMEOUT` before it fails.
 const BACKOFF_MIN: Duration = Duration::from_millis(500);
 const BACKOFF_MAX: Duration = Duration::from_secs(10);
+/// How long each attempt looks for the Mac on the local network before falling back to `server`.
+const DISCOVER_WAIT: Duration = Duration::from_secs(1);
 /// How long a stopping agent waits for its close to reach the peer.
 const CLOSE_GRACE: Duration = Duration::from_secs(1);
 
@@ -112,9 +117,9 @@ pub async fn run(
         Mode::Listen(addr) => {
             listen(addr, tls::server_config(&settings.identity)?, ctx, stop).await
         }
-        Mode::Connect { host, port } => {
+        Mode::Connect { server, port } => {
             let config = tls::client_config(&settings.identity)?;
-            connect(&host, port, config, &ctx, stop).await
+            connect(server.as_deref(), port, config, &ctx, stop).await
         }
     }
 }
@@ -147,6 +152,12 @@ async fn listen(
     // the socket fails, it's opened again.
     let mut endpoint = Endpoint::server(config.clone(), addr)
         .with_context(|| format!("can't listen on UDP {addr}"))?;
+    tokio::spawn(discover::answer(
+        SocketAddr::new(addr.ip(), discover::port(addr.port())),
+        ctx.ours,
+        addr.port(),
+        stop.clone(),
+    ));
     let mut backoff = Backoff::default();
     loop {
         info!("listening on UDP {addr}");
@@ -185,26 +196,26 @@ async fn accept(incoming: Incoming, ctx: Arc<Ctx>) {
 }
 
 async fn connect(
-    host: &str,
+    server: Option<&str>,
     port: u16,
     config: ClientConfig,
     ctx: &Ctx,
     stop: CancellationToken,
 ) -> Result<()> {
-    let target = format!("{host}:{port}");
     let mut backoff = Backoff::default();
     let mut failures = Failures::default();
     loop {
         let started = Instant::now();
         let attempt = tokio::select! {
             () = stop.cancelled() => return Ok(()),
-            attempt = dial(host, port, &config) => attempt,
+            attempt = dial(server, port, &config, ctx) => attempt,
         };
         match attempt {
             Ok((endpoint, conn)) => {
                 if let Some((count, since)) = failures.recovered() {
                     info!(
-                        "reached {target} after {count} failed {} over {} s",
+                        "reached {} after {count} failed {} over {} s",
+                        conn.remote_address(),
                         if count == 1 { "attempt" } else { "attempts" },
                         since.elapsed().as_secs()
                     );
@@ -217,13 +228,7 @@ async fn connect(
                     }
                 }
             }
-            Err(e) => {
-                let message = match e.downcast_ref::<ConnectionError>() {
-                    Some(e) => explain_target(&target, e, ctx.ours),
-                    None => format!("{e:#}"),
-                };
-                failures.failed(ctx, &target, started, message);
-            }
+            Err(message) => failures.failed(ctx, started, message),
         }
         tokio::select! {
             () = sleep(backoff.next()) => {}
@@ -232,24 +237,55 @@ async fn connect(
     }
 }
 
-/// One connection attempt: resolve `host`, then a QUIC handshake from a new UDP socket, so a
-/// socket broken by a network change isn't reused.
-async fn dial(host: &str, port: u16, config: &ClientConfig) -> Result<(Endpoint, Connection)> {
-    let addr = tokio::net::lookup_host((host, port))
+/// One connection attempt: find the Mac, then a QUIC handshake from a new UDP socket, so a
+/// socket broken by a network change isn't reused. A failure comes back explained for the log.
+async fn dial(
+    server: Option<&str>,
+    port: u16,
+    config: &ClientConfig,
+    ctx: &Ctx,
+) -> Result<(Endpoint, Connection), String> {
+    let addr = locate(server, port, ctx.peer)
         .await
-        .with_context(|| format!("can't resolve {host}"))?
-        .next()
-        .with_context(|| format!("{host} has no address"))?;
+        .map_err(|e| format!("{e:#}"))?;
     let local = if addr.is_ipv4() {
         SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0))
     } else {
         SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))
     };
-    let endpoint = Endpoint::client(local)?;
+    let endpoint = Endpoint::client(local).map_err(|e| format!("can't open a UDP socket: {e}"))?;
     let conn = endpoint
-        .connect_with(config.clone(), addr, tls::SERVER_NAME)?
-        .await?;
+        .connect_with(config.clone(), addr, tls::SERVER_NAME)
+        .map_err(|e| format!("can't connect to {addr}: {e}"))?
+        .await
+        .map_err(|e| explain(addr, &e, ctx.ours))?;
     Ok((endpoint, conn))
+}
+
+/// Where the Mac is: wherever the machine with its fingerprint answers on the local network, or
+/// else `server` from agent.toml, looked up again each time.
+async fn locate(server: Option<&str>, port: u16, peer: Fingerprint) -> Result<SocketAddr> {
+    match discover::find(discover::port(port), peer, DISCOVER_WAIT).await {
+        Ok(Some(addr)) => {
+            debug!("found the Mac at {addr}");
+            return Ok(addr);
+        }
+        Ok(None) => {}
+        Err(e) => debug!("can't look for the Mac on the local network: {e:#}"),
+    }
+    let Some(host) = server else {
+        bail!(
+            "the Mac didn't answer on the local network: is crossglide running there, on the \
+             same network? (If it's on another network, set `server` to its address.)"
+        );
+    };
+    tokio::net::lookup_host((host, port))
+        .await
+        .with_context(|| {
+            format!("the Mac didn't answer on the local network, and can't resolve {host}")
+        })?
+        .next()
+        .with_context(|| format!("{host} has no address"))
 }
 
 /// Closes every connection on `endpoint`, telling peers the agent is stopping, and gives that a
@@ -476,11 +512,7 @@ fn route(
 }
 
 /// A connection that failed or closed before the hellos, explained for the log.
-fn explain(addr: SocketAddr, reason: &ConnectionError, ours: Fingerprint) -> String {
-    explain_target(&addr.to_string(), reason, ours)
-}
-
-fn explain_target(target: &str, reason: &ConnectionError, ours: Fingerprint) -> String {
+fn explain(target: SocketAddr, reason: &ConnectionError, ours: Fingerprint) -> String {
     match reason {
         ConnectionError::ApplicationClosed(close) if close.error_code == code::NOT_TRUSTED => {
             format!(
@@ -556,11 +588,11 @@ struct Failures {
 }
 
 impl Failures {
-    fn failed(&mut self, ctx: &Ctx, target: &str, started: Instant, message: String) {
+    fn failed(&mut self, ctx: &Ctx, started: Instant, message: String) {
         self.count += 1;
         self.since.get_or_insert(started);
         if self.last.as_ref() == Some(&message) {
-            debug!("still failing to reach {target} (attempt {})", self.count);
+            debug!("still failing to reach the Mac (attempt {})", self.count);
         } else {
             ctx.problem(message.clone());
             self.last = Some(message);
@@ -624,7 +656,7 @@ mod tests {
 
     fn connect(port: u16) -> Mode {
         Mode::Connect {
-            host: "127.0.0.1".into(),
+            server: Some("127.0.0.1".into()),
             port,
         }
     }

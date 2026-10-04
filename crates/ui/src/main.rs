@@ -134,9 +134,10 @@ impl Agent {
     fn stop(&mut self) {
         if let Some(running) = self.running.take() {
             running.stop.cancel();
-            let _ = self
-                .runtime
-                .block_on(tokio::time::timeout(Duration::from_secs(3), running.task));
+            // The timer has to be made inside the runtime.
+            let _ = self.runtime.block_on(async {
+                tokio::time::timeout(Duration::from_secs(3), running.task).await
+            });
         }
     }
 
@@ -201,7 +202,10 @@ fn view(agent: &Agent) -> View {
     let Some(peer) = &status.peer else {
         let headline = match &settings.mode {
             Mode::Listen(_) => "Waiting for the PC to connect".to_string(),
-            Mode::Connect { host, .. } => format!("Connecting to {host}"),
+            Mode::Connect {
+                server: Some(host), ..
+            } => format!("Connecting to {host}"),
+            Mode::Connect { server: None, .. } => "Looking for the Mac".to_string(),
         };
         return View {
             color: if status.problem.is_some() {

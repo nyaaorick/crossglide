@@ -135,7 +135,7 @@ The QUIC connection every later feature shares. The PC connects to the Mac.
 **Running it on the PC and the Mac:**
 
 1. On each machine, `just dev fingerprint` prints that machine's fingerprint (and creates its certificate the first time).
-2. On each machine, `just dev` once: it writes a commented `agent.toml` (role `listen` on the Mac, `connect` on the PC) and stops. Set `peer_fingerprint` to the other machine's fingerprint and, on the PC, `server` to the Mac's IP address or host name.
+2. On each machine, `just dev` once: it writes a commented `agent.toml` (role `listen` on the Mac, `connect` on the PC) and stops. Set `peer_fingerprint` to the other machine's fingerprint. The PC finds the Mac by broadcasting on the local network; `server` (the Mac's IP address or host name) is only a fallback for when it can't.
 3. `just dev` on both. Each logs `connected to …` and a first clock estimate within a second, then, from the second minute on, a `clock:` line every minute.
 4. For the 24-hour run, start the PC's agent in a terminal on the PC, not over SSH. Afterwards, read `agent.log` on both machines: every `disconnected` should be followed by `connected` once both are awake and online, and `jitter` in the `clock:` lines should stay under 1 ms.
 

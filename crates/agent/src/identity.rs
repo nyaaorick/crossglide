@@ -23,6 +23,14 @@ impl Fingerprint {
         let digest = ring::digest::digest(&ring::digest::SHA256, cert);
         Self(digest.as_ref().try_into().expect("SHA-256 is 32 bytes"))
     }
+
+    pub fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
 }
 
 impl fmt::Display for Fingerprint {

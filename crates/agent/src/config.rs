@@ -32,7 +32,8 @@ pub struct Config {
     pub role: Role,
     #[serde(default = "default_port")]
     pub port: u16,
-    /// The Mac's address; only used when connecting.
+    /// The Mac's address, for when it can't be found on the local network; only used when
+    /// connecting.
     #[serde(default)]
     pub server: String,
     #[serde(default)]
@@ -98,12 +99,9 @@ impl Config {
         Ok(match self.role {
             Role::Listen => Mode::Listen(SocketAddr::from((Ipv4Addr::UNSPECIFIED, self.port))),
             Role::Connect => {
-                let host = self.server.trim();
-                if host.is_empty() {
-                    bail!("set `server` to the Mac's IP address or host name");
-                }
+                let server = self.server.trim();
                 Mode::Connect {
-                    host: host.to_string(),
+                    server: (!server.is_empty()).then(|| server.to_string()),
                     port: self.port,
                 }
             }
@@ -156,10 +154,13 @@ fn template(role: Role) -> String {
 # "listen" on the Mac, "connect" on the PC. The PC connects to the Mac.
 role = "{role}"
 
-# UDP port of the side channel, the same on both machines.
+# UDP port of the side channel, the same on both machines. The PC finds the Mac on
+# the local network through the next port up.
 port = {DEFAULT_PORT}
 
-# The Mac's IP address or host name. Only used when role = "connect".
+# Only used when role = "connect". Leave it empty: the PC finds the Mac on the local
+# network by itself, even after the Mac's IP address changes. Set it to the Mac's IP
+# address or host name only if the PC can't find it (the Mac is on another network).
 server = ""
 
 # The other machine's certificate fingerprint: run `just dev fingerprint` on the
@@ -198,7 +199,13 @@ mod tests {
         assert!(listen.peer_fingerprint().is_err());
 
         let connect = parse(&template(Role::Connect));
-        assert!(connect.mode().is_err(), "server is still empty");
+        assert!(matches!(
+            connect.mode().unwrap(),
+            Mode::Connect {
+                server: None,
+                port: DEFAULT_PORT
+            }
+        ));
     }
 
     #[test]
@@ -208,8 +215,8 @@ mod tests {
             "ab".repeat(32)
         ));
         match config.mode().unwrap() {
-            Mode::Connect { host, port } => {
-                assert_eq!((host.as_str(), port), ("192.168.1.20", 5000))
+            Mode::Connect { server, port } => {
+                assert_eq!((server.as_deref(), port), (Some("192.168.1.20"), 5000))
             }
             Mode::Listen(_) => panic!("expected connect"),
         }

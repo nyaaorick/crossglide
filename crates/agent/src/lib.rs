@@ -7,6 +7,7 @@ pub mod audio;
 pub mod clock;
 pub mod config;
 pub mod control;
+pub mod discover;
 pub mod identity;
 pub mod link;
 pub mod proto;
