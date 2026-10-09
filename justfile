@@ -9,8 +9,17 @@ dev *args:
     cargo run -p crossglide-agent -- {{args}}
 
 # Build and run the tray app from source, with its log in the terminal
+[linux]
+[windows]
 tray:
     cargo run -p crossglide-ui
+
+# Build and run the tray app from source, with its log in the terminal
+[macos]
+tray:
+    cargo build -p crossglide-ui
+    scripts/sign-mac.sh target/debug/crossglide
+    target/debug/crossglide
 
 # Run all Rust tests
 test:

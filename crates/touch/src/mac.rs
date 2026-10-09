@@ -3,8 +3,8 @@
 //! screen edge; while the PC has control it swallows the Mac's own input, passing keys and
 //! clicks on instead.
 //!
-//! The tap needs Accessibility permission for the app that runs crossglide (Terminal, when it
-//! runs from source).
+//! The tap needs Accessibility permission for the app that started crossglide: Terminal when it's
+//! started from a terminal, or crossglide itself when it starts at login.
 
 use std::ffi::{c_int, c_void};
 use std::ptr;
@@ -554,9 +554,9 @@ pub fn start_tap(
                 );
                 if port.is_null() {
                     drop(Box::from_raw(tap));
-                    let _ = started.send(Err("can't tap input: give the app running crossglide \
-                         (Terminal, when run from source) Accessibility permission in System \
-                         Settings → Privacy & Security, then restart it"
+                    let _ = started.send(Err("can't tap input: give crossglide (or Terminal, \
+                         when it's started from a terminal) Accessibility permission in System \
+                         Settings → Privacy & Security"
                         .to_string()));
                     return;
                 }

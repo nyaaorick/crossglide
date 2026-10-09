@@ -82,11 +82,7 @@ pub async fn serve(
     if listening {
         #[cfg(target_os = "macos")]
         if let Some(settings) = settings {
-            // Already logged by `prepare` if it failed.
-            match mac::Local::get(settings) {
-                Ok(local) => return mac::serve(local, session, requests).await,
-                Err(e) => return idle(requests, &e).await,
-            }
+            return mac::serve_when_ready(settings, session, requests).await;
         }
         let _ = (settings, session);
         return idle(requests, "touch is off on the Mac").await;
@@ -111,9 +107,9 @@ pub async fn idle(mut requests: mpsc::Receiver<Handled>, why: &str) {
 
 #[cfg(target_os = "macos")]
 mod mac {
-    use std::sync::atomic::AtomicU16;
     use std::sync::atomic::Ordering::Relaxed;
-    use std::sync::{Arc, Mutex, OnceLock};
+    use std::sync::atomic::{AtomicBool, AtomicU16};
+    use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
     use crossglide_touch::edge::{self, Edge};
@@ -131,6 +127,13 @@ mod mac {
 
     /// How long the PC gets to take control before the Mac keeps it.
     const ENTER_TIMEOUT: Duration = Duration::from_secs(1);
+    /// How often a connection without Accessibility permission checks for it again.
+    const PERMISSION_RECHECK: Duration = Duration::from_secs(2);
+
+    const NO_PERMISSION: &str = "the Mac needs Accessibility permission for the trackpad and \
+        keyboard to control the PC: in System Settings → Privacy & Security → Accessibility, turn \
+        on crossglide (when it starts at login) or Terminal (when it's started from a terminal). \
+        Touch starts by itself once it's allowed";
 
     /// The Mac's trackpad capture and input tap. They start once and run for the life of the
     /// process, across connections (and agent restarts from the tray); each connection's
@@ -143,26 +146,27 @@ mod mac {
         events: tokio::sync::Mutex<mpsc::UnboundedReceiver<TapEvent>>,
     }
 
-    static LOCAL: OnceLock<Result<Arc<Local>, String>> = OnceLock::new();
+    /// Started once; a failed start isn't kept, so it's tried again once the permission is there.
+    static LOCAL: Mutex<Option<Arc<Local>>> = Mutex::new(None);
+    /// Whether macOS has already been asked to show its permission dialog, which it does once.
+    static PROMPTED: AtomicBool = AtomicBool::new(false);
 
     impl Local {
-        /// Starts the capture and tap the first time; later calls return the same ones, with
-        /// the first call's settings (changed settings need a restart).
+        /// Starts the capture and tap the first time it succeeds; later calls return the same
+        /// ones, with the first start's settings (changed settings need a restart).
         pub fn get(settings: &TouchSettings) -> Result<Arc<Self>, String> {
-            LOCAL
-                .get_or_init(|| Self::start(settings.clone()).map(Arc::new))
-                .clone()
+            let mut local = LOCAL.lock().unwrap();
+            if let Some(local) = &*local {
+                return Ok(local.clone());
+            }
+            let started = Arc::new(Self::start(settings.clone())?);
+            *local = Some(started.clone());
+            Ok(started)
         }
 
         fn start(settings: TouchSettings) -> Result<Self, String> {
-            if !mac::accessibility_trusted(true) {
-                return Err(
-                    "the app running crossglide (Terminal, when run from source) \
-                            needs Accessibility permission for the trackpad and keyboard to \
-                            control the PC: allow it in System Settings → Privacy & Security → \
-                            Accessibility, then restart crossglide"
-                        .into(),
-                );
+            if !mac::accessibility_trusted(!PROMPTED.swap(true, Relaxed)) {
+                return Err(NO_PERMISSION.into());
             }
             let shared = Arc::new(Shared::default());
             let conn: Arc<Mutex<Option<Connection>>> = Arc::default();
@@ -259,7 +263,47 @@ mod mac {
     }
 
     /// Runs touch for one connection until its control stream closes.
-    pub async fn serve(local: Arc<Local>, session: Session, mut requests: mpsc::Receiver<Handled>) {
+    /// Touch for one connection. Without Accessibility permission it answers the PC with why, and
+    /// checks again every few seconds, so allowing it takes effect without a restart.
+    pub async fn serve_when_ready(
+        settings: &TouchSettings,
+        session: Session,
+        mut requests: mpsc::Receiver<Handled>,
+    ) {
+        // `prepare` has logged why if this fails.
+        let mut why = match Local::get(settings) {
+            Ok(local) => return serve(local, session, requests).await,
+            Err(e) => e,
+        };
+        let mut recheck = tokio::time::interval(PERMISSION_RECHECK);
+        loop {
+            tokio::select! {
+                request = requests.recv() => {
+                    let Some((_, reply)) = request else { return };
+                    let _ = reply.send(Response::Error { message: why.clone() });
+                }
+                _ = recheck.tick() => {
+                    if !mac::accessibility_trusted(false) {
+                        continue;
+                    }
+                    match Local::get(settings) {
+                        Ok(local) => {
+                            info!("touch: Accessibility permission is there now");
+                            return serve(local, session, requests).await;
+                        }
+                        Err(e) => {
+                            if e != why {
+                                warn!("touch: {e}");
+                            }
+                            why = e;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn serve(local: Arc<Local>, session: Session, mut requests: mpsc::Receiver<Handled>) {
         let mut events = local.events.lock().await;
         // Events from before this connection (or between connections) are stale.
         while events.try_recv().is_ok() {}

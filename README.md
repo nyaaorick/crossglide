@@ -61,7 +61,7 @@ You need two machines on the same network: a **MacBook** and a **Windows 11 PC**
 | Mac | Windows PC |
 | --- | --- |
 | `just tray`, or double-click `scripts/tray.command` | drag `scripts\tray.ps1` into PowerShell |
-| Allow **Accessibility** for Terminal when asked (System Settings → Privacy & Security), then start it again | In the tray menu choose **Install touchpad driver** (once) |
+| Allow **Accessibility** when asked (System Settings → Privacy & Security): for Terminal, and for **crossglide** if you use *Start at login*. Touch starts by itself once it's allowed | In the tray menu choose **Install touchpad driver** (once) |
 
 Both tray icons turn green when they're connected, and PC audio starts playing on the Mac. Push the pointer through the left or right edge of the Mac's screen, or press `ctrl+option+cmd+space`, and the MacBook's trackpad and keyboard drive the PC.
 

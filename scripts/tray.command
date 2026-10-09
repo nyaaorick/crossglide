@@ -21,7 +21,10 @@ main() {
     # last run, or started some other way).
     pkill -x crossglide 2>/dev/null && sleep 0.3
 
-    cargo run -p crossglide-ui
+    cargo build -p crossglide-ui || exit 1
+    # Signed, so the Accessibility permission "Start at login" needs survives the next rebuild.
+    scripts/sign-mac.sh target/debug/crossglide
+    exec target/debug/crossglide
 }
 
 # Pulls the latest commit if GitHub answers. Never fails the launch. ICMP ping is often blocked, so

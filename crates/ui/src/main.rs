@@ -66,6 +66,10 @@ fn main() {
         default_hook(panic);
     }));
     info!("tray app started");
+    // So login starts this build from now on, not an older one.
+    if let Err(e) = autostart::refresh() {
+        warn!("can't update Start at login: {e:#}");
+    }
     run(Agent::new(&dir), dir);
 }
 
